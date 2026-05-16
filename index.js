@@ -7,6 +7,11 @@ app.use(express.json());
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || ‘formataha2024’;
 const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY;
 const IG_ACCESS_TOKEN = process.env.IG_ACCESS_TOKEN;
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+
+// Her kullanıcı için konuşma geçmişi
+const konusmalar = {};
 
 const FORMA_GORSELLERI = {
 ‘0021’: ‘https://res.cloudinary.com/dzfiyamng/image/upload/v1778891830/BJK_BEYAZ_RETRO_vybc1r.jpg’,
@@ -18,15 +23,26 @@ const FORMA_GORSELLERI = {
 
 const TUM_GORSELLER = Object.values(FORMA_GORSELLERI);
 
-const SISTEM_PROMPT = `Sen bir forma mağazasının nazik, resmi ve profesyonel satış danışmanısın. Müşterilerle “Efendim” diyerek hitap ediyorsun. Kısa ve net cevaplar veriyorsun. Firma adını asla söyleme.
+const SISTEM_PROMPT = `Sen bir forma mağazasının satış temsilcisisin. Instagram DM’den müşterilerle yazışıyorsun. Konuşma geçmişini dikkatlice oku ve bağlamı anla.
 
-YAZIM KURALLARI:
+KİŞİLİK:
 
-- Türkçe yaz, Türkçe karakterleri doğru kullan (ş, ı, ğ, ü, ö, ç, İ, Ş, Ğ, Ü, Ö, Ç)
-- Kısa ve net cevaplar ver
-- Madde listesi yapma
-- Sohbeti uzatan sorular sorma
-- İzin verilen emojiler: 👍 🙏🏻 🎁
+- Gerçek bir insan gibi konuş. Müşteri yapay zeka ile konuştuğunu anlamamalı.
+- “Efendim” hitabını doğal kullan, her cümlede değil.
+- Kısa yaz. Tek cümle çoğu zaman yeterli.
+- Türkçe karakterleri doğru kullan: ş, ı, ğ, ü, ö, ç, İ, Ş, Ğ, Ü, Ö, Ç
+- Emin olmadığın bir şeyi asla uydurma. Bilmiyorsan sor.
+
+KESİNLİKLE YASAK:
+
+- Madde listesi (•, -, 1. 2. 3.)
+- Kalın yazı (**)
+- “Harika seçim”, “Mükemmel”, “Sevinçle”, “Tabii ki!”
+- Uzun paragraflar
+- Yapay zekaya özgü kalıp cümleler
+
+KONUŞMA GEÇMİŞİ KURALI (ÇOK ÖNEMLİ):
+Müşteri “bunu istiyorum”, “şunu alacağım”, “onu istiyorum” gibi bir şey yazarsa konuşma geçmişine bak. Bir önceki mesajda hangi ürün konuşuluyordu veya hangi ürün görselinin kodu yazılıysa onu anla. Asla “hangi ürünü?” diye sorma, geçmişten anla.
 
 ÜRÜN KATALOĞU:
 
@@ -38,33 +54,32 @@ YAZIM KURALLARI:
 
 SPESİFİK SORULAR:
 
-- Beden/boy/kilo sorulursa: Kiloya göre beden öner. SADECE KİLOYA BAK:
-  55-65 kg -> S beden
-  66-75 kg -> M beden
-  76-85 kg -> L beden
-  86-95 kg -> XL beden
-  96 kg ve üzeri -> XXL beden
-  Cevap: “Efendim o kiloya [BEDEN] beden tam olacaktır 👍”
-- İsim baskısı sorulursa: “Evet efendim, istediğiniz isim ve numarayı yazdırabiliyoruz.”
-- Ödeme sorulursa: “Kapıda ödeme nakit veya kredi kartı ile mevcuttur efendim.”
-- Kumaş/terleme sorulursa: “Ürünlerimiz orijinal kalitede forma kumaşıdır, koku yapmaz efendim.”
-- Çekme/yıkama sorulursa: “Kesinlikle çekmez efendim.”
-- Arma/logo sorulursa: “Nakış işlemedir, sökülme yapmaz efendim.”
-- İndirim sorulursa: “En dip fiyat budur efendim.”
-- Kargo/konum sorulursa: “Tekirdağ’dan Aras Kargo ile şeffaf kargo ve kapıda ödeme güvencesiyle gönderiyoruz efendim.”
+- Beden/kilo: SADECE KİLOYA BAK:
+  55-65 kg -> S | 66-75 kg -> M | 76-85 kg -> L | 86-95 kg -> XL | 96+ kg -> XXL
+  Cevap: “O kiloya [BEDEN] beden tam olur efendim 👍 Yardımcı olabileceğim başka bir konu varsa buradayım.”
+- İsim baskısı: “Evet, istediğiniz isim ve numarayı yazıyoruz efendim. Yardımcı olabileceğim başka bir konu varsa buradayım.”
+- Ödeme: “Kapıda nakit veya kart var efendim. Yardımcı olabileceğim başka bir konu varsa buradayım.”
+- Kumaş: “Kaliteli forma kumaşı efendim, koku yapmaz. Yardımcı olabileceğim başka bir konu varsa buradayım.”
+- Çekme: “Çekmez efendim. Yardımcı olabileceğim başka bir konu varsa buradayım.”
+- Arma/logo: “Nakış işleme efendim, sökülmez. Yardımcı olabileceğim başka bir konu varsa buradayım.”
+- İndirim: “Fiyatlarımız zaten kampanya fiyatı efendim, daha aşağı inemeyiz. Yardımcı olabileceğim başka bir konu varsa buradayım.”
+- Kargo/konum: “Tekirdağ’dan Aras Kargo ile gönderiyoruz efendim, kapıda ödeme var. Yardımcı olabileceğim başka bir konu varsa buradayım.”
+- Teslimat: “Siparişten sonraki gün kargoya veriyoruz, 2-3 iş günü içinde kapınızda efendim. Yardımcı olabileceğim başka bir konu varsa buradayım.”
+- İade: “Teslimattan sonra 2 gün içinde bildirirseniz iade veya değişim yapıyoruz efendim. Yardımcı olabileceğim başka bir konu varsa buradayım.”
+- Kampanya süresi: “Stoklar sınırlı efendim, uzun sürmez. Yardımcı olabileceğim başka bir konu varsa buradayım.”
 
-VİTRİN - Müşteri fiyat, model, forma sorarsa SADECE şunu yaz:
+VİTRİN - Müşteri fiyat, model, forma, katalog sorarsa SADECE şunu yaz:
 ###VITRIN_GOSTER###
 
 SATIŞ ADIMLARI:
 
 1. Vitrin: ###VITRIN_GOSTER### yaz
-1. Beden: “S, M, L, XL ve XXL bedenlerimiz mevcuttur efendim. Hangi bedeni hazırlayalım?”
-1. Adres: “Siparişi oluşturmak için Ad-Soyad, Telefon ve Tam Adresinizi yazar mısınız efendim?”
-1. Onay: Bilgileri alt alta yaz, “Toplam [Fiyat]₺ - Kapıda Ödeme. Onaylıyor musunuz efendim?” ekle.
+1. Müşteri model seçince beden sor: “Hangi bedeni hazırlayalım efendim?”
+1. Beden gelince adres iste: “Ad-Soyad, telefon ve adresinizi alabilir miyim efendim?”
+1. Onay: Bilgileri düz yaz, “Toplam [Fiyat]₺ kapıda ödeme. Onaylıyor musunuz efendim?”
 
-SİPARİŞ KAPANIŞI (sadece onay gelince):
-“Siparişinizi özenle hazırlayıp kargoya teslim edeceğiz. Sağlıcakla kalın efendim 🙏🏻”
+SİPARİŞ KAPANIŞI (sadece müşteri onayladıktan sonra):
+“Siparişinizi aldık, özenle hazırlayıp kargoya vereceğiz. Sağlıcakla kalın efendim 🙏🏻”
 
 ###SIPARIS_BASLA###
 {“ad_soyad”: “”,“telefon”: “”,“adres”: “”,“urun”: “”,“toplam”: “”}
@@ -78,6 +93,37 @@ const VITRIN_METNI = `Kargo Dahil 1 Adet 630₺
 Kapıda Ödeme Şeffaf Kargo İle Gönderim Sağlıyoruz 🙏🏻
 Ürünü Görüp Öyle Teslim Alıyorsunuz 👍`;
 
+// ============================================
+// TELEGRAM BİLDİRİM
+// ============================================
+async function telegramaBildirimGonder(siparis) {
+try {
+if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
+const mesaj = `🛍️ YENİ SİPARİŞ!\n\n👤 ${siparis.ad_soyad}\n📞 ${siparis.telefon}\n📦 ${siparis.urun}\n📍 ${siparis.adres}\n💰 ${siparis.toplam}₺ - Kapıda Ödeme`;
+await axios.post(
+`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+{ chat_id: TELEGRAM_CHAT_ID, text: mesaj }
+);
+console.log(‘Telegram bildirimi gönderildi!’);
+} catch (err) {
+console.error(‘Telegram hatası:’, err.message);
+}
+}
+
+// ============================================
+// SİPARİŞ PARSE
+// ============================================
+function siparisiParsEt(metin) {
+try {
+const match = metin.match(/###SIPARIS_BASLA###([\s\S]*?)###SIPARIS_BITIS###/);
+if (match) return JSON.parse(match[1].trim());
+} catch (err) {}
+return null;
+}
+
+// ============================================
+// WEBHOOK DOĞRULAMA
+// ============================================
 app.get(’/webhook’, (req, res) => {
 const mode = req.query[‘hub.mode’];
 const token = req.query[‘hub.verify_token’];
@@ -89,35 +135,67 @@ res.status(403).send(‘Hatalı token’);
 }
 });
 
+// ============================================
+// GELEN MESAJLARI İŞLE
+// ============================================
 app.post(’/webhook’, async (req, res) => {
 res.status(200).send(‘OK’);
 try {
 const body = req.body;
 if (body.object !== ‘instagram’) return;
+
+```
 for (const entry of body.entry) {
-for (const event of entry.messaging || []) {
-const senderId = event.sender?.id;
-const messageText = event.message?.text;
-if (!senderId || !messageText) continue;
-if (event.message?.is_echo) continue;
-const yanit = await claudeYanitAl(messageText);
-if (yanit.includes(’###VITRIN_GOSTER###’)) {
-await instagramaMesajGonder(senderId, VITRIN_METNI);
-for (const url of TUM_GORSELLER) {
-await instagramaGorselGonder(senderId, url);
-await bekle(500);
+  for (const event of entry.messaging || []) {
+    const senderId = event.sender?.id;
+    const messageText = event.message?.text;
+    if (!senderId || !messageText) continue;
+    if (event.message?.is_echo) continue;
+
+    // Konuşma geçmişini al veya oluştur
+    if (!konusmalar[senderId]) konusmalar[senderId] = [];
+    konusmalar[senderId].push({ role: 'user', content: messageText });
+
+    // Son 20 mesajı tut
+    if (konusmalar[senderId].length > 20) {
+      konusmalar[senderId] = konusmalar[senderId].slice(-20);
+    }
+
+    const yanit = await claudeYanitAl(konusmalar[senderId]);
+
+    // Asistan cevabını geçmişe ekle
+    const temizYanit = yanit.replace(/###SIPARIS_BASLA###[\s\S]*?###SIPARIS_BITIS###/g, '').replace(/###VITRIN_GOSTER###/g, '').trim();
+    konusmalar[senderId].push({ role: 'assistant', content: temizYanit });
+
+    // Sipariş var mı?
+    const siparis = siparisiParsEt(yanit);
+    if (siparis && siparis.ad_soyad) {
+      await telegramaBildirimGonder(siparis);
+    }
+
+    // Vitrin mi yoksa normal mesaj mı?
+    if (yanit.includes('###VITRIN_GOSTER###')) {
+      await instagramaMesajGonder(senderId, VITRIN_METNI);
+      for (const url of TUM_GORSELLER) {
+        await instagramaGorselGonder(senderId, url);
+        await bekle(500);
+      }
+    } else {
+      await instagramaMesajGonder(senderId, temizYanit);
+    }
+  }
 }
-} else {
-await instagramaMesajGonder(senderId, yanit);
-}
-}
-}
+```
+
 } catch (err) {
 console.error(‘Hata:’, err.message);
 }
 });
 
-async function claudeYanitAl(mesaj) {
+// ============================================
+// CLAUDE API - KONUŞMA GEÇMİŞİYLE
+// ============================================
+async function claudeYanitAl(mesajlar) {
 try {
 const response = await axios.post(
 ‘https://api.anthropic.com/v1/messages’,
@@ -125,7 +203,7 @@ const response = await axios.post(
 model: ‘claude-haiku-4-5-20251001’,
 max_tokens: 500,
 system: SISTEM_PROMPT,
-messages: [{ role: ‘user’, content: mesaj }],
+messages: mesajlar,
 },
 {
 headers: {
@@ -137,10 +215,14 @@ headers: {
 );
 return response.data.content[0].text;
 } catch (err) {
-return ‘Şu an teknik bir sorun yaşıyoruz efendim. En kısa sürede dönüş yapacağız.’;
+console.error(‘Claude hatası:’, err.message);
+return ‘Şu an teknik bir sorun var efendim, birazdan tekrar yazabilirsiniz.’;
 }
 }
 
+// ============================================
+// INSTAGRAM METİN GÖNDER
+// ============================================
 async function instagramaMesajGonder(aliciId, mesaj) {
 try {
 await axios.post(
@@ -153,6 +235,9 @@ console.error(‘Mesaj hatası:’, err.message);
 }
 }
 
+// ============================================
+// INSTAGRAM GÖRSEL GÖNDER
+// ============================================
 async function instagramaGorselGonder(aliciId, gorselUrl) {
 try {
 await axios.post(
