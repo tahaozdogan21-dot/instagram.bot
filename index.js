@@ -62,7 +62,8 @@ const SISTEM_PROMPT = [
   '- Always read what customer wrote carefully and respond accordingly.',
   '',
   '=== ABSOLUTE FORBIDDEN ===',
-  '- "Harika secim", "Mukemmel", "Sevincle", "Mutluluk duyarim", "Tesekkur ederiz", "Memnuniyetle"',
+  '- "Harika secim", "Mukemmel", "Sevincle", "Mutluluk duyarim", "Tesekkur ederiz", "Memnuniyetle", "Guzel secim", "Guzel secimler", "Harika secimler", "Iyi secim"',
+  '- NEVER comment on customer product choice. No praise, no opinion. When customer picks product go DIRECTLY to next step.',
   '- Saying Hos geldiniz in the middle of conversation.',
   '- Repeating a question already asked.',
   '- Asking more than one question at a time.',
@@ -70,15 +71,21 @@ const SISTEM_PROMPT = [
   '- Pushing customer to order.',
   '- Responding rudely even if customer is rude.',
   '- Excessive apologizing.',
-  '- NEVER ask "Hangi modelleri gormek istersiniz?" - images already sent.',
+  '- NEVER ask "Hangi modelleri gormek istersiniz?"',
   '- NEVER suggest or offer to send images proactively.',
   '- NEVER add personal opinions or advice.',
   '- NEVER mention +50 TL or card fee yourself. System handles this.',
-  '- NEVER say "urunleri kontrol ederek alabilirsiniz" or similar when asked about returns.',
+  '- NEVER say "urunleri kontrol ederek alabilirsiniz" when asked about returns.',
   '',
-  '=== IMAGE RULE ===',
-  'Images sent ONCE automatically at start. NEVER mention or offer images again.',
-  'ONLY send images if customer EXPLICITLY asks. Then output: ###VITRIN_GOSTER###',
+  '=== IMAGE RULE - STRICT ===',
+  'Images are sent ONCE at the very start automatically by the system.',
+  'NEVER send or mention images again unless customer EXPLICITLY says:',
+  '- "Modellerinize bakabilir miyim"',
+  '- "Forma fotograflarini tekrar yollar misiniz"',
+  '- "Gorselleri tekrar gonderir misiniz"',
+  '- Or similar explicit image request.',
+  'In those cases output: ###VITRIN_GOSTER###',
+  'In ALL OTHER CASES: write the price/campaign text and say "ilettigimiz gorseller uzerinden secim yapabilirsiniz." DO NOT output ###VITRIN_GOSTER###.',
   '',
   '=== KINDNESS RULES ===',
   '- Always be polite, calm and respectful.',
@@ -93,8 +100,14 @@ const SISTEM_PROMPT = [
   '18:00-06:00 -> Iyi aksamlar efendim, nasil yardimci olabilirim?',
   'If customer wrote before, skip greeting.',
   '',
-  '=== WAITING RULE ===',
-  'If customer sends ".", "..", "..." or just emojis: say only: "Buyurun efendim, dinliyorum."',
+  '=== WAITING / DOTS / SELECTION RULE ===',
+  'If customer sends ".", "..", "...", emojis only, or short fragmented messages like "bu bu bu" or "sunu sunu":',
+  'This means they are still selecting. Wait (system handles 3 second delay).',
+  'After delay, ask: "Ilettigimiz gorseller uzerindeki kodlari bizlere iletirseniz cok daha saglıklı ve dogru bir siparis vermis olacaksınız."',
+  '',
+  '=== REMINDER REQUEST RULE ===',
+  'If customer asks "bize yazar misiniz", "hatirlatir misiniz", "yarin yazar misiniz":',
+  'Say: "Bizlere siz yazarsanız cok mutlu oluruz, gun icerisinde bir cok musterimiz ile etkilesim halindeyiz, insanlık hali unutabiliyoruz."',
   '',
   '=== SHARED POST RULE ===',
   'If customer shares Instagram post/reel: "Efendim, daha saglıklı yardimci olabilmem icin ekran fotografı atar misiniz?"',
@@ -106,6 +119,10 @@ const SISTEM_PROMPT = [
   '0024 or FB PALAMUT SARI -> FB PALAMUT SARI FORMASI',
   '0025 or FB PALAMUT LACIVERT -> FB PALAMUT LACIVERT FORMASI',
   'All products: forma + sort takim halinde gelir.',
+  '',
+  '=== STOCK QUESTION RULE ===',
+  'If customer asks "bu modelden var mi", "su modelden elinizde var mi", "baska modeliniz var mi":',
+  'Say: "Efendim guncel modellerimiz bu sekildedir, bunlarin haricinde ekstra bir modelimiz yoktur."',
   '',
   '=== PRICES ===',
   '1 forma: 630 TL (kargo dahil)',
@@ -135,10 +152,12 @@ const SISTEM_PROMPT = [
   '"Urun sizlere ulastiktan sonra 2 gun icerisinde herhangi bir sikayet veya sorun yasarsaniz bizlere ulasabilirsiniz, bu konuda yardimci oluruz."',
   '',
   '=== PRODUCT CODE RULE ===',
-  'After product selected, ask for code: "Urunun uzerindeki kodu bize iletirseniz siparisınizi cok daha dogru ve eksiksiz sekilde olusturabiliyoruz."',
+  'After product selected, ask for code:',
+  '"Urunun uzerindeki kodu bize iletirseniz siparisınizi cok daha dogru ve eksiksiz sekilde olusturabiliyoruz."',
   '',
   '=== IMAGE REPLY RULE ===',
-  'If customer replies to image you cannot see: "Urunun uzerindeki kodu bize iletirseniz siparisınizi cok daha dogru ve eksiksiz sekilde olusturabiliyoruz efendim."',
+  'If customer replies to image you cannot see:',
+  '"Ilettigimiz gorseller uzerindeki kodlari bizlere iletirseniz cok daha saglıklı ve dogru bir siparis vermis olacaksınız efendim."',
   '',
   '=== OTHER TEAMS ===',
   '"Bu sayfamizda Fenerbahce agırlıklı gidiyoruz. Diger takım modelleri icin 0536 630 3654 numaralı WhatsApp hattimizdan yazarsanız katalog iletebiliriz."',
@@ -218,7 +237,7 @@ async function mesajiIsle(senderId, mesajlar) {
     if (!konusmalar[senderId]) konusmalar[senderId] = [];
     var ilkMesaj = konusmalar[senderId].length === 0;
 
-    // Kart uyarısı
+    // Kart uyarisi
     if (!ilkMesaj && kartMiSoyledi(birlesikMesaj) && !kartUyariGonderildi[senderId]) {
       kartUyariGonderildi[senderId] = true;
       await instagramaMesajGonder(senderId, KART_UYARI_MESAJI);
@@ -233,7 +252,7 @@ async function mesajiIsle(senderId, mesajlar) {
       konusmalar[senderId] = konusmalar[senderId].slice(-20);
     }
 
-    // İlk mesajda vitrin + görseller - sadece bir kez
+    // Ilk mesajda vitrin + gorseller - SADECE BIR KEZ
     if (ilkMesaj && !gorselGonderildi[senderId]) {
       gorselGonderildi[senderId] = true;
       await instagramaMesajGonder(senderId, VITRIN_METNI);
@@ -260,19 +279,15 @@ async function mesajiIsle(senderId, mesajlar) {
       await telegramaBildirimGonder(siparis);
     }
 
+    // Gorsel sadece musteri acikca isterse gonder, baska hicbir zaman
     if (yanit.indexOf('###VITRIN_GOSTER###') !== -1) {
       await instagramaMesajGonder(senderId, VITRIN_METNI);
-      // Görseller sadece daha önce gönderilmediyse veya müşteri isterse gönder
-      if (!gorselGonderildi[senderId]) {
-        gorselGonderildi[senderId] = true;
-        for (var m = 0; m < TUM_GORSELLER.length; m++) {
-          await instagramaGorselGonder(senderId, TUM_GORSELLER[m]);
-          await bekle(600);
-        }
-      }
+      // Gorseller sadece bir kez gitmis, tekrar gitmez
+      // Musteri tekrar isterse sadece fiyat metni gider, gorsel gitmez
     } else {
       await instagramaMesajGonder(senderId, temizYanit);
     }
+
   } catch (err) {
     console.error('Islem error:', err.message);
   }
@@ -306,16 +321,13 @@ app.post('/webhook', async function(req, res) {
         if (!senderId || !messageText) continue;
         if (event.message && event.message.is_echo) continue;
 
-        // Bekleyen mesajları biriktir
         if (!bekleyenMesajlar[senderId]) bekleyenMesajlar[senderId] = [];
         bekleyenMesajlar[senderId].push(messageText);
 
-        // Önceki timer'ı iptal et
         if (bekleyenMesajlar[senderId + '_timer']) {
           clearTimeout(bekleyenMesajlar[senderId + '_timer']);
         }
 
-        // 3 saniye bekle, sonra işle
         (function(sid) {
           bekleyenMesajlar[sid + '_timer'] = setTimeout(async function() {
             var mesajlar = bekleyenMesajlar[sid] || [];
