@@ -199,6 +199,9 @@ async function process(id) {
     }
     u.hist.push({ role: 'user', content: combined });
     u.hist.push({ role: 'assistant', content: VITRIN });
+    await wait(500);
+    var kodMesaji = 'Urun secimlerinizi bizlere kodlarini soyleyerek yapmanizi rica ediyoruz. Bu sayede urunuzun yanlıs ya da sorunlu gelmesini onluyoruz. (ORNEK KOD: 0021) Bu sekilde bizlere istediginiz urun kodlarini iletebilirsiniz.';
+    await igMsg(id, kodMesaji);
     u.busy = false;
     if (u.queue.length > 0) await process(id);
     return;
