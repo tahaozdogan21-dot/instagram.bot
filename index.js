@@ -13,6 +13,8 @@ const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const konusmalar = {};
 const gorselGonderildi = {};
 const kartUyariGonderildi = {};
+const bekleyenMesajlar = {};
+const islemDevam = {};
 
 const FORMA_GORSELLERI = {
   '0021': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891830/BJK_BEYAZ_RETRO_vybc1r.jpg',
@@ -131,7 +133,6 @@ const SISTEM_PROMPT = [
   '=== RETURN/EXCHANGE RULE ===',
   'If customer asks about return or exchange, say EXACTLY:',
   '"Urun sizlere ulastiktan sonra 2 gun icerisinde herhangi bir sikayet veya sorun yasarsaniz bizlere ulasabilirsiniz, bu konuda yardimci oluruz."',
-  'NEVER say "urunleri kontrol ederek alabilirsiniz" or similar.',
   '',
   '=== PRODUCT CODE RULE ===',
   'After product selected, ask for code: "Urunun uzerindeki kodu bize iletirseniz siparisınizi cok daha dogru ve eksiksiz sekilde olusturabiliyoruz."',
@@ -180,7 +181,7 @@ const SISTEM_PROMPT = [
 const VITRIN_METNI = 'Kargo Dahil 1 Adet 630\u20BA\n2 Adet Forma 1.250\u20BA\n\n2 Al 1 Hediye Kampanyas\u0131nda 1.250\u20BA\n2 Forma Al\u0131n 1.250\u20BA \u00d6deyin, 1 Forma Bizden Hediye!\nToplam 3 Forma Kap\u0131n\u0131za Gelir!\n\nKap\u0131da \u00d6deme \u015eeffaf Kargo \u0130le G\u00f6nderim Sa\u011fl\u0131yoruz \ud83d\ude4f\ud83c\udffb\n\u00dcr\u00fcn\u00fc G\u00f6r\u00fcp \u00d6yle Teslim Al\u0131yorsunuz \ud83d\udc4d';
 
 function kartMiSoyledi(mesaj) {
-  var kart = ['kart', 'kard', 'kartla', 'karta', 'kredi', 'kart ile', 'kartla odeyeceg', 'kartla yapacag'];
+  var kart = ['kart', 'kard', 'kartla', 'karta', 'kredi', 'kart ile'];
   var lower = mesaj.toLowerCase();
   return kart.some(function(k) { return lower.indexOf(k) !== -1; });
 }
@@ -205,6 +206,78 @@ function siparisiParsEt(metin) {
     if (match) return JSON.parse(match[1].trim());
   } catch (err) {}
   return null;
+}
+
+async function mesajiIsle(senderId, mesajlar) {
+  if (islemDevam[senderId]) return;
+  islemDevam[senderId] = true;
+
+  try {
+    var birlesikMesaj = mesajlar.join(' ');
+
+    if (!konusmalar[senderId]) konusmalar[senderId] = [];
+    var ilkMesaj = konusmalar[senderId].length === 0;
+
+    // Kart uyarısı
+    if (!ilkMesaj && kartMiSoyledi(birlesikMesaj) && !kartUyariGonderildi[senderId]) {
+      kartUyariGonderildi[senderId] = true;
+      await instagramaMesajGonder(senderId, KART_UYARI_MESAJI);
+      konusmalar[senderId].push({ role: 'user', content: birlesikMesaj });
+      konusmalar[senderId].push({ role: 'assistant', content: KART_UYARI_MESAJI });
+      islemDevam[senderId] = false;
+      return;
+    }
+
+    konusmalar[senderId].push({ role: 'user', content: birlesikMesaj });
+    if (konusmalar[senderId].length > 20) {
+      konusmalar[senderId] = konusmalar[senderId].slice(-20);
+    }
+
+    // İlk mesajda vitrin + görseller - sadece bir kez
+    if (ilkMesaj && !gorselGonderildi[senderId]) {
+      gorselGonderildi[senderId] = true;
+      await instagramaMesajGonder(senderId, VITRIN_METNI);
+      for (var k = 0; k < TUM_GORSELLER.length; k++) {
+        await instagramaGorselGonder(senderId, TUM_GORSELLER[k]);
+        await bekle(600);
+      }
+      konusmalar[senderId].push({ role: 'assistant', content: VITRIN_METNI });
+      islemDevam[senderId] = false;
+      return;
+    }
+
+    var yanit = await claudeYanitAl(konusmalar[senderId]);
+
+    var temizYanit = yanit
+      .replace(/###SIPARIS_BASLA###[\s\S]*?###SIPARIS_BITIS###/g, '')
+      .replace(/###VITRIN_GOSTER###/g, '')
+      .trim();
+
+    konusmalar[senderId].push({ role: 'assistant', content: temizYanit });
+
+    var siparis = siparisiParsEt(yanit);
+    if (siparis && siparis.ad_soyad) {
+      await telegramaBildirimGonder(siparis);
+    }
+
+    if (yanit.indexOf('###VITRIN_GOSTER###') !== -1) {
+      await instagramaMesajGonder(senderId, VITRIN_METNI);
+      // Görseller sadece daha önce gönderilmediyse veya müşteri isterse gönder
+      if (!gorselGonderildi[senderId]) {
+        gorselGonderildi[senderId] = true;
+        for (var m = 0; m < TUM_GORSELLER.length; m++) {
+          await instagramaGorselGonder(senderId, TUM_GORSELLER[m]);
+          await bekle(600);
+        }
+      }
+    } else {
+      await instagramaMesajGonder(senderId, temizYanit);
+    }
+  } catch (err) {
+    console.error('Islem error:', err.message);
+  }
+
+  islemDevam[senderId] = false;
 }
 
 app.get('/webhook', function(req, res) {
@@ -233,64 +306,29 @@ app.post('/webhook', async function(req, res) {
         if (!senderId || !messageText) continue;
         if (event.message && event.message.is_echo) continue;
 
-        var ilkMesaj = !konusmalar[senderId] || konusmalar[senderId].length === 0;
+        // Bekleyen mesajları biriktir
+        if (!bekleyenMesajlar[senderId]) bekleyenMesajlar[senderId] = [];
+        bekleyenMesajlar[senderId].push(messageText);
 
-        if (!konusmalar[senderId]) konusmalar[senderId] = [];
-
-        if (!ilkMesaj && kartMiSoyledi(messageText) && !kartUyariGonderildi[senderId]) {
-          kartUyariGonderildi[senderId] = true;
-          await instagramaMesajGonder(senderId, KART_UYARI_MESAJI);
-          konusmalar[senderId].push({ role: 'user', content: messageText });
-          konusmalar[senderId].push({ role: 'assistant', content: KART_UYARI_MESAJI });
-          continue;
+        // Önceki timer'ı iptal et
+        if (bekleyenMesajlar[senderId + '_timer']) {
+          clearTimeout(bekleyenMesajlar[senderId + '_timer']);
         }
 
-        konusmalar[senderId].push({ role: 'user', content: messageText });
-        if (konusmalar[senderId].length > 20) {
-          konusmalar[senderId] = konusmalar[senderId].slice(-20);
-        }
-
-        if (ilkMesaj) {
-          await instagramaMesajGonder(senderId, VITRIN_METNI);
-          for (var k = 0; k < TUM_GORSELLER.length; k++) {
-            await instagramaGorselGonder(senderId, TUM_GORSELLER[k]);
-            await bekle(600);
-          }
-          gorselGonderildi[senderId] = true;
-          konusmalar[senderId].push({ role: 'assistant', content: VITRIN_METNI });
-          continue;
-        }
-
-        var yanit = await claudeYanitAl(konusmalar[senderId]);
-
-        var temizYanit = yanit
-          .replace(/###SIPARIS_BASLA###[\s\S]*?###SIPARIS_BITIS###/g, '')
-          .replace(/###VITRIN_GOSTER###/g, '')
-          .trim();
-
-        konusmalar[senderId].push({ role: 'assistant', content: temizYanit });
-
-        var siparis = siparisiParsEt(yanit);
-        if (siparis && siparis.ad_soyad) {
-          await telegramaBildirimGonder(siparis);
-        }
-
-        if (yanit.indexOf('###VITRIN_GOSTER###') !== -1) {
-          await instagramaMesajGonder(senderId, VITRIN_METNI);
-          if (!gorselGonderildi[senderId]) {
-            for (var m = 0; m < TUM_GORSELLER.length; m++) {
-              await instagramaGorselGonder(senderId, TUM_GORSELLER[m]);
-              await bekle(600);
+        // 3 saniye bekle, sonra işle
+        (function(sid) {
+          bekleyenMesajlar[sid + '_timer'] = setTimeout(async function() {
+            var mesajlar = bekleyenMesajlar[sid] || [];
+            bekleyenMesajlar[sid] = [];
+            if (mesajlar.length > 0) {
+              await mesajiIsle(sid, mesajlar);
             }
-            gorselGonderildi[senderId] = true;
-          }
-        } else {
-          await instagramaMesajGonder(senderId, temizYanit);
-        }
+          }, 3000);
+        })(senderId);
       }
     }
   } catch (err) {
-    console.error('Error:', err.message);
+    console.error('Webhook error:', err.message);
   }
 });
 
