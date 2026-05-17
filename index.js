@@ -92,6 +92,11 @@ const PROMPT = [
   '=== STOCK ===',
   '"Efendim guncel modellerimiz bu sekildedir, bunlarin haricinde ekstra bir modelimiz yoktur."',
   '',
+  '=== 0022 STOK KURALI - SADECE 22 MAYIS 2026 ONCESI GECERLI ===',
+  'BUGUN 22 MAYIS 2026 TARIHINDEN ONCE ISE ve musteri 0022 FB RETRO SARI FORMASI siparis vermek istiyorsa:',
+  'Say EXACTLY: Bu ayin 22sinde Cuma gunu stogümuza gelecek, onumuzdeki gunlerde Kurban Bayrami oldugu icin gonderimini bayramdan sonra saglayabilecegiz efendim. Dilerseniz sari forma yerine farkli bir model secebilirsiniz, ya da sectiginiz bir modelden iki adet gonderebiliriz. Bekleriz diyorsaniz ayin 22sinden sonra sizlere gonderimini saglariz.',
+  'If today is 22 May 2026 or later: IGNORE this rule completely, process 0022 orders normally.',
+  '',
   '=== PRICES ===',
   '1->630TL | 2->1250TL | Campaign: 2 al 1250TL ode 1 hediye toplam 3 | 4->1750TL',
   'If 2 selected asks gift: "Efendim dilediginiz 3. bir forma kodunu iletirseniz siparisınize ekleyelim."',
@@ -153,7 +158,7 @@ const PROMPT = [
 ].join('\n');
 
 function getK(id) {
-  if (!K[id]) K[id] = { hist: [], gorselGitti: false, kartGitti: false, busy: false, queue: [], timer: null };
+  if (!K[id]) K[id] = { hist: [], gorselGitti: false, kartGitti: false, sariUyariGitti: false, busy: false, queue: [], timer: null };
   return K[id];
 }
 
@@ -256,6 +261,22 @@ async function process(id) {
     return;
   }
 
+  // 0022 STOK KURALI - 22 Mayis 2026 oncesi gecerli
+  var bugun = new Date();
+  var sinir = new Date('2026-05-22T00:00:00');
+  var sariKelimeler = ['0022', 'sari forma', 'sarı forma', 'retro sari', 'retro sarı'];
+  var sariVar = sariKelimeler.some(function(k) { return combined.toLowerCase().indexOf(k) !== -1; });
+  if (bugun < sinir && sariVar && !u.sariUyariGitti) {
+    u.sariUyariGitti = true;
+    var sariMesaj = 'Bu ayin 22\'sinde Cuma gunu stogümuza gelecek, onumuzdeki gunlerde Kurban Bayrami oldugu icin gonderimini bayramdan sonra saglayabilecegiz efendim. Dilerseniz sari forma yerine farkli bir model secebilirsiniz, ya da sectiginiz bir modelden iki adet gonderebiliriz. Bekleriz diyorsaniz ayin 22\'sinden sonra sizlere gonderimini saglariz.';
+    await igMsg(id, sariMesaj);
+    u.hist.push({ role: 'user', content: combined });
+    u.hist.push({ role: 'assistant', content: sariMesaj });
+    u.busy = false;
+    if (u.queue.length > 0) await process(id);
+    return;
+  }
+
   u.hist.push({ role: 'user', content: combined });
   if (u.hist.length > 20) u.hist = u.hist.slice(-20);
 
@@ -271,6 +292,17 @@ async function process(id) {
     await igMsg(id, VITRIN);
   } else {
     await igMsg(id, clean);
+  }
+
+  // BAYRAM GECIKME UYARISI - 20-29 Mayis 2026 arasi siparis onaylaninca gonder
+  if (siparis && siparis.ad_soyad) {
+    var bugunBayram = new Date();
+    var bayramBaslangic = new Date('2026-05-20T00:00:00');
+    var bayramBitis = new Date('2026-05-29T23:59:59');
+    if (bugunBayram >= bayramBaslangic && bugunBayram <= bayramBitis) {
+      await wait(500);
+      await igMsg(id, 'Efendim biliyorsunuz malum Kurban Bayrami yaklasıyor, bu durumlarda siparisıniz gecikebilir. Bunun nedeni kargo firmalarının tatil olmasından dolayı bu tarz gecikmeler yasanabilir ve elinize gec ulasabilir. Bu durum sizler icin bir sorun teskil ediyor mu?');
+    }
   }
 
   u.busy = false;
