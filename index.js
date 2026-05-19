@@ -11,7 +11,7 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 const K = {};
-const islenenMesajlar = new Set(); // Ayni mesaj ID'si 2 kez gelirse atla
+const islenenMesajlar = new Set();
 
 const GORSELLER = [
   'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891830/BJK_BEYAZ_RETRO_vybc1r.jpg',
@@ -31,11 +31,10 @@ const ISIMLER = {
 
 const VITRIN = 'Kargo Dahil 1 Adet 630\u20BA\n2 Adet Forma 1.250\u20BA\n\n2 Al 1 Hediye Kampanyas\u0131nda 1.250\u20BA\n2 Forma Al\u0131n 1.250\u20BA \u00d6deyin, 1 Forma Bizden Hediye!\nToplam 3 Forma Kap\u0131n\u0131za Gelir!\n\nKap\u0131da \u00d6deme \u015eeffaf Kargo \u0130le G\u00f6nderim Sa\u011fl\u0131yoruz \ud83d\ude4f\ud83c\udffb\n\u00dcr\u00fcn\u00fc G\u00f6r\u00fcp \u00d6yle Teslim Al\u0131yorsunuz \ud83d\udc4d';
 
-const KOD_MESAJI = 'Urun secimlerinizi bizlere kodlarini soyleyerek yapmanizi rica ediyoruz. Bu sayede urunuzun yanlıs ya da sorunlu gelmesini onluyoruz. Her gorselin uzerinde 4 haneli bir urun kodu bulunmaktadir. Ornek: 0021, 0022, 0023 gibi. Istediginiz urunun kodunu bize iletmeniz yeterlidir.';
+const KOD_MESAJI = 'Urun secimlerinizi bizlere kodlarini soyleyerek yapmanizi rica ediyoruz. Bu sayede urunuzun yanlis ya da sorunlu gelmesini onluyoruz. Her gorselin uzerinde 4 haneli bir urun kodu bulunmaktadir. Ornek: 0021, 0022, 0023 gibi. Istediginiz urunun kodunu bize iletmeniz yeterlidir.';
 
 const KART = 'Kartla odemelerde kargo firmalari Pos Cihazi Hizmet Bedeli adi altinda +50 TL ekstra bir ucret cikartıyor. Sizler icin en uygunu nakit olmasidır, o sekilde nakit olarak sisteme girecegiz.';
 
-// Gorsel gidip gitmedigini history'den kontrol et
 function gorselGittiMi(hist) {
   return hist.some(function(m) {
     return m.role === 'assistant' && m.content && m.content.indexOf('GORSEL_GONDERILDI') !== -1;
@@ -45,6 +44,12 @@ function gorselGittiMi(hist) {
 function kartGittiMi(hist) {
   return hist.some(function(m) {
     return m.role === 'assistant' && m.content && m.content.indexOf('Pos Cihazi Hizmet Bedeli') !== -1;
+  });
+}
+
+function sariGittiMi(hist) {
+  return hist.some(function(m) {
+    return m.role === 'assistant' && m.content && m.content.indexOf('22\'sinde') !== -1;
   });
 }
 
@@ -98,7 +103,6 @@ function wait(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 
 async function aiCall(hist) {
   try {
-    // History'den GORSEL_GONDERILDI flagini temizle AI'a gondermeden once
     var temizHist = hist.map(function(m) {
       return { role: m.role, content: m.content.replace('GORSEL_GONDERILDI', '').trim() };
     });
@@ -129,9 +133,8 @@ async function process(id) {
   var isFirst = u.hist.length === 0;
   var gorselGitti = gorselGittiMi(u.hist);
   var kartGitti = kartGittiMi(u.hist);
-  var sariGitti = u.hist.some(function(m) { return m.role === 'assistant' && m.content && m.content.indexOf('22\'sinde') !== -1; });
+  var sariGitti = sariGittiMi(u.hist);
 
-  // GORSEL - sadece hic gonderilmediyse gonder
   if (isFirst && !gorselGitti) {
     await igMsg(id, VITRIN);
     for (var i = 0; i < GORSELLER.length; i++) {
@@ -140,7 +143,6 @@ async function process(id) {
     }
     await wait(500);
     await igMsg(id, KOD_MESAJI);
-    // Gorsel giddigini history'e kaydet
     u.hist.push({ role: 'user', content: combined });
     u.hist.push({ role: 'assistant', content: 'GORSEL_GONDERILDI ' + VITRIN });
     u.busy = false;
@@ -148,7 +150,6 @@ async function process(id) {
     return;
   }
 
-  // Kart uyarisi
   if (kartVar(combined) && !kartGitti) {
     await igMsg(id, KART);
     u.hist.push({ role: 'user', content: combined });
@@ -158,13 +159,12 @@ async function process(id) {
     return;
   }
 
-  // 0022 stok uyarisi - 22 Mayis 2026 oncesi
   var bugun = new Date();
   var sinir = new Date('2026-05-22T00:00:00');
-  var sariKelimeler = ['0022', 'sari forma', 'sarı forma', 'retro sari', 'retro sarı'];
+  var sariKelimeler = ['0022', 'sari forma', 'sari forma', 'retro sari', 'retro sari'];
   var sariVar = sariKelimeler.some(function(k) { return combined.toLowerCase().indexOf(k) !== -1; });
   if (bugun < sinir && sariVar && !sariGitti) {
-    var sariMesaj = 'Bu ayin 22\'sinde Cuma gunu stogümuza gelecek, onumuzdeki gunlerde Kurban Bayrami oldugu icin gonderimini bayramdan sonra saglayabilecegiz efendim. Dilerseniz sari forma yerine farkli bir model secebilirsiniz, ya da sectiginiz bir modelden iki adet gonderebiliriz. Bekleriz diyorsaniz ayin 22\'sinden sonra sizlere gonderimini saglariz.';
+    var sariMesaj = 'Bu ayin 22\'sinde Cuma gunu stogumuza gelecek, onumuzdeki gunlerde Kurban Bayrami oldugu icin gonderimini bayramdan sonra saglayabilecegiz efendim. Dilerseniz sari forma yerine farkli bir model secebilirsiniz, ya da sectiginiz bir modelden iki adet gonderebiliriz. Bekleriz diyorsaniz ayin 22\'sinden sonra sizlere gonderimini saglariz.';
     await igMsg(id, sariMesaj);
     u.hist.push({ role: 'user', content: combined });
     u.hist.push({ role: 'assistant', content: sariMesaj });
@@ -175,12 +175,9 @@ async function process(id) {
 
   u.hist.push({ role: 'user', content: combined });
   if (u.hist.length > 20) {
-    // GORSEL_GONDERILDI flagini her zaman koru
     var gorselMesaj = u.hist.find(function(m) { return m.role === 'assistant' && m.content && m.content.indexOf('GORSEL_GONDERILDI') !== -1; });
     u.hist = u.hist.slice(-20);
-    if (gorselMesaj && !gorselGittiMi(u.hist)) {
-      u.hist.unshift(gorselMesaj);
-    }
+    if (gorselMesaj && !gorselGittiMi(u.hist)) u.hist.unshift(gorselMesaj);
   }
 
   var reply = await aiCall(u.hist);
@@ -189,13 +186,10 @@ async function process(id) {
 
   var siparis = parseSiparis(reply);
 
-  // Once musteri mesaji git
   await igMsg(id, clean);
 
-  // Siparis onaylandiysa Telegram + bayram uyarisi
   if (siparis && siparis.ad_soyad) {
     await tgGonder(siparis);
-    // Bayram gecikme uyarisi 20-29 Mayis
     var bayramBaslangic = new Date('2026-05-20T00:00:00');
     var bayramBitis = new Date('2026-05-29T23:59:59');
     if (bugun >= bayramBaslangic && bugun <= bayramBitis) {
@@ -226,7 +220,7 @@ const PROMPT = [
   'IMAGE RULE - ABSOLUTE STRICT:',
   'Images are sent ONCE at the very start by system. NEVER again.',
   'If customer asks to see images/products again: say EXACTLY:',
-  '"Sohbetimizin basinda tum modellerimizi sizinle paylassmıstık efendim, yukarı kaydırarak gorsellere ulasabilirsiniz."',
+  '"Sohbetimizin basinda tum modellerimizi sizinle paylasmistik efendim, yukari kaydirarak gorsellere ulasabilirsiniz."',
   'NEVER send images. NEVER suggest sending images.',
   '',
   'PRICE RULE - STRICT:',
@@ -246,11 +240,11 @@ const PROMPT = [
   'If history exists: skip greeting.',
   '',
   'DOTS/FRAGMENTS: If customer sends . .. ... emojis or fragments:',
-  '"Ilettigimiz gorseller uzerindeki kodlari bizlere iletirseniz cok daha saglıklı ve dogru bir siparis vermis olacaksınız."',
+  '"Ilettigimiz gorseller uzerindeki kodlari bizlere iletirseniz cok daha saglikli ve dogru bir siparis vermis olacaksiniz."',
   '',
-  'REMINDER: "Bizlere siz yazarsanız cok mutlu oluruz, gun icerisinde bir cok musterimiz ile etkilesim halindeyiz, insanlık hali unutabiliyoruz."',
+  'REMINDER: "Bizlere siz yazarsaniz cok mutlu oluruz, gun icerisinde bir cok musterimiz ile etkilesim halindeyiz, insanlik hali unutabiliyoruz."',
   '',
-  'SHARED POST: "Efendim, daha saglıklı yardimci olabilmem icin ekran fotografı atar misiniz?"',
+  'SHARED POST: "Efendim, daha saglikli yardimci olabilmem icin ekran fotografi atar misiniz?"',
   '',
   'PRODUCTS (UPPERCASE FULL NAME ALWAYS):',
   '0021 -> FB RETRO CUBUKLU FORMASI',
@@ -259,7 +253,7 @@ const PROMPT = [
   '0024 -> FB PALAMUT SARI FORMASI',
   '0025 -> FB PALAMUT LACIVERT FORMASI',
   'ADULT jerseys: NO shorts. Only forma.',
-  'If asked about adult shorts: "Yetiskin formalarinda sort bulunmamaktadir, sadece forma olarak gonderim yapılıyor."',
+  'If asked about adult shorts: "Yetiskin formalarinda sort bulunmamaktadir, sadece forma olarak gonderim yapiliyor."',
   'Kids 12+: forma + sort takim. Kids <12: yok. Kids socks: yok. Kids print: sadece sorulursa.',
   '',
   'STOCK: "Efendim guncel modellerimiz bu sekildedir, bunlarin haricinde ekstra bir modelimiz yoktur."',
@@ -279,13 +273,13 @@ const PROMPT = [
   '',
   'CODE RULE: After product selected: "Urunun uzerindeki kodu bize iletirseniz siparisınizi cok daha dogru ve eksiksiz olusturabiliyoruz."',
   '',
-  'IMAGE REPLY: "Ilettigimiz gorseller uzerindeki kodlari bizlere iletirseniz cok daha saglıklı ve dogru siparis vermis olacaksınız efendim."',
+  'IMAGE REPLY: "Ilettigimiz gorseller uzerindeki kodlari bizlere iletirseniz cok daha saglikli ve dogru siparis vermis olacaksiniz efendim."',
   '',
-  'OTHER TEAMS: "Bu sayfamizda Fenerbahce agırlıklı gidiyoruz. Diger modeller icin 0536 630 3654 WhatsApp hattimizdan katalog iletebiliriz."',
+  'OTHER TEAMS: "Bu sayfamizda Fenerbahce agirlikli gidiyoruz. Diger modeller icin 0536 630 3654 WhatsApp hattimizdan katalog iletebiliriz."',
   'HOW MANY: Ask Fenerbahce mi baska mi. FB: guncel bunlar. Other: WhatsApp.',
   '',
   'SHIPPING:',
-  'Seffaf Kargo: "Seffaf paketleme ile gonderiyoruz, kurye kapınıza geldiginde urun icerigi disaridan gorunur sekilde teslim edilir."',
+  'Seffaf Kargo: "Seffaf paketleme ile gonderiyoruz, kurye kapiniza geldiginde urun icerigi disaridan gorunur sekilde teslim edilir."',
   'NEVER say musteri paketi acip kontrol edebilir.',
   'PTT: anlassmamiz yok, en yakin Aras subesi.',
   'Other cargo: sadece Aras.',
@@ -331,12 +325,10 @@ app.post('/webhook', async function(req, res) {
 
         var u = getK(sid);
 
-        // Ayni message ID tekrar geldiyse tamamen atla (reklama 2 kez tiklanma)
         var msgId = ev.message && ev.message.mid;
         if (msgId) {
           if (islenenMesajlar.has(msgId)) continue;
           islenenMesajlar.add(msgId);
-          // 10 dakika sonra temizle
           setTimeout(function() { islenenMesajlar.delete(msgId); }, 600000);
         }
 

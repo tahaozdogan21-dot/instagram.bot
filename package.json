@@ -1,7 +1,6 @@
 {
   "name": "instagram-bot",
   "version": "1.0.0",
-  "description": "FORMAtaha Instagram DM Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
