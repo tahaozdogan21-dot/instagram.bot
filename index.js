@@ -13,12 +13,7 @@ const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const K = {};
 const islenenMesajlar = new Set(); // Ayni mesaj ID'si 2 kez gelirse atla
 
-const GORSELLER = [
-  'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891830/BJK_BEYAZ_RETRO_vybc1r.jpg',
-  'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891832/BJK_BEYAZ_RETRO_pumkjo.jpg',
-  'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891832/BJK_BEYAZ_RETRO_vtectc.jpg',
-  'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891833/BJK_BEYAZ_RETRO_iybbwa.jpg',
-  'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891832/BJK_BEYAZ_RETRO_oaxlkt.jpg',
+axlkt.jpg',
 ];
 
 const ISIMLER = {
@@ -129,6 +124,7 @@ async function process(id) {
   var isFirst = u.hist.length === 0;
   var gorselGitti = gorselGittiMi(u.hist);
   var kartGitti = kartGittiMi(u.hist);
+  var sariGitti = u.hist.some(function(m) { return m.role === 'assistant' && m.content && m.content.indexOf('22\'sinde') !== -1; });
 
   // GORSEL - sadece hic gonderilmediyse gonder
   if (isFirst && !gorselGitti) {
