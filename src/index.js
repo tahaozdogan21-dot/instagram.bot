@@ -10,314 +10,347 @@ const IG_ACCESS_TOKEN = process.env.IG_ACCESS_TOKEN;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
-const konusmalar = {};
+const K = {};
+const islenenMesajlar = new Set(); // Ayni mesaj ID'si 2 kez gelirse atla
 
-const FORMA_GORSELLERI = {
-  '0021': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891830/BJK_BEYAZ_RETRO_vybc1r.jpg',
-  '0022': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891832/BJK_BEYAZ_RETRO_pumkjo.jpg',
-  '0023': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891832/BJK_BEYAZ_RETRO_vtectc.jpg',
-  '0024': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891833/BJK_BEYAZ_RETRO_iybbwa.jpg',
-  '0025': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891832/BJK_BEYAZ_RETRO_oaxlkt.jpg',
+const GORSELLER = [
+  'https://res.cloudinary.com/dzfiyamng/image/upload/v1779228420/BJK_BEYAZ_RETRO_hhvwsb.jpg',
+  'https://res.cloudinary.com/dzfiyamng/image/upload/v1779228423/BJK_BEYAZ_RETRO_afsrb9.jpg',
+  'https://res.cloudinary.com/dzfiyamng/image/upload/v1779228420/BJK_BEYAZ_RETRO_hxfej8.jpg',
+  'https://res.cloudinary.com/dzfiyamng/image/upload/v1779228421/BJK_BEYAZ_RETRO_wvjtrj.jpg',
+];
+
+const ISIMLER = {
+  '0011': 'GS LION TASARIM FORMASI',
+  '0012': 'GS RETRO SARI FORMASI',
+  '0013': 'GS RETRO KIRMIZI FORMASI',
+  '0014': 'GS YESIL TASARIM FORMASI',
 };
 
-const TUM_GORSELLER = Object.values(FORMA_GORSELLERI);
+const VITRIN = 'Kargo Dahil 1 Adet 630\u20BA\n2 Adet Forma 1.250\u20BA\n\n2 Al 1 Hediye Kampanyas\u0131nda 1.250\u20BA\n2 Forma Al\u0131n 1.250\u20BA \u00d6deyin, 1 Forma Bizden Hediye!\nToplam 3 Forma Kap\u0131n\u0131za Gelir!\n\nKap\u0131da \u00d6deme \u015eeffaf Kargo \u0130le G\u00f6nderim Sa\u011fl\u0131yoruz \ud83d\ude4f\ud83c\udffb\n\u00dcr\u00fcn\u00fc G\u00f6r\u00fcp \u00d6yle Teslim Al\u0131yorsunuz \ud83d\udc4d';
 
-const SISTEM_PROMPT = [
-  'You are a sales representative for a jersey store. You chat with customers on Instagram DM.',
-  'Always read the full conversation history before responding. ALWAYS respond in Turkish.',
-  '',
-  '=== IDENTITY ===',
-  '- You are a real human. Never reveal you are AI.',
-  '- NEVER invent a name for yourself.',
-  '- NEVER mention the store name or brand name.',
-  '',
-  '=== LANGUAGE RULES ===',
-  '- ALWAYS use formal language: "siz", "sizin", "size", "sizinle". NEVER use "sen", "sana", "seninle".',
-  '- Use "efendim" naturally, only once per response, only at the beginning of a sentence, never at the end.',
-  '- Do NOT use "efendim" in every sentence. Use it occasionally so the customer feels valued but not robotic.',
-  '- Keep responses SHORT. Maximum 2-3 sentences.',
-  '- NEVER use bullet points, numbered lists, or bold text.',
-  '- Turkish characters must be correct: \u015f \u0131 \u011f \u00fc \u00f6 \u00e7 \u0130 \u015e \u011e \u00dc \u00d6 \u00c7',
-  '',
-  '=== FORBIDDEN ===',
-  '- "Harika se\u00e7im", "M\u00fckemmel", "Sevin\u00e7le", "Mutluluk duyar\u0131m", "Te\u015fekk\u00fcr ederiz", "Memnuniyetle"',
-  '- Saying "Ho\u015f geldiniz" in the middle of conversation',
-  '- Repeating a question already asked',
-  '- Asking more than one question at a time',
-  '- Inventing information',
-  '- Pushing customer to order ("Forma sipari\u015f etmek ister misiniz?" type phrases)',
-  '- Responding rudely even if customer is rude',
-  '- Excessive apologizing ("\u00c7ok \u00f6z\u00fcr dilerim" etc.)',
-  '',
-  '=== KINDNESS RULES ===',
-  '- Always be polite, calm and respectful.',
-  '- If customer is rude, gently redirect without responding in kind.',
-  '- Never pressure customer. Let them decide at their own pace.',
-  '- Do not overwhelm customer with too much information.',
-  '',
-  '=== GREETING - Only on first message ===',
-  '06:00-12:00 -> G\u00fcnayd\u0131n efendim, nas\u0131l yard\u0131mc\u0131 olabilirim?',
-  '12:00-18:00 -> \u0130yi g\u00fcnler efendim, nas\u0131l yard\u0131mc\u0131 olabilirim?',
-  '18:00-06:00 -> \u0130yi ak\u015famlar efendim, nas\u0131l yard\u0131mc\u0131 olabilirim?',
-  'If customer wrote before in history, skip greeting completely.',
-  '',
-  '=== PRODUCTS ===',
-  '0021 or FB RETRO CUBUKLU -> FB Retro \u00c7ubuklu Formas\u0131',
-  '0022 or FB RETRO SARI -> FB Retro Sar\u0131 Formas\u0131',
-  '0023 or FB GRI TASARIM -> FB Gri Tasar\u0131m Formas\u0131',
-  '0024 or FB PALAMUT SARI -> FB Palamut Sar\u0131 Formas\u0131',
-  '0025 or FB PALAMUT LACIVERT -> FB Palamut Lacivert Formas\u0131',
-  '',
-  'All products come as a SET: jersey + shorts (forma + \u015fort takım halinde gelir).',
-  '',
-  '=== PRICES ===',
-  '1 forma tak\u0131m: 630 TL (kargo dahil)',
-  '2 forma tak\u0131m: 1.250 TL (kargo dahil)',
-  '2 Al 1 Hediye Kampanyas\u0131: 2 forma al 1.250 TL \u00f6de, 1 forma bizden hediye gelir. Toplam 3 forma kap\u0131na gelir.',
-  '4 forma tak\u0131m: 1.750 TL (kargo dahil)',
-  '',
-  'CAMPAIGN EXPLANATION: If customer asks about campaign or "2 alana 1 hediye":',
-  '2 forma se\u00e7ip 1.250 TL \u00f6dedi\u011finizde, diledi\u011finiz 3. bir formay\u0131 da se\u00e7ebilirsiniz, o bizden hediye olarak siparişinize eklenir.',
-  '',
-  'If customer selected 2 products and asks about the gift: "Efendim diledi\u011finiz 3. bir forma modelini se\u00e7ip kodunu iletirseniz siparişinize ekleyelim."',
-  '',
-  '=== SIZE GUIDE - ONLY look at weight, ignore height ===',
-  '55-65 kg -> S',
-  '66-75 kg -> M',
-  '76-85 kg -> L',
-  '86-95 kg -> XL',
-  '96+ kg -> XXL',
-  'Example: 161 90 -> 90 kg = XL. Say: O kiloya XL beden tam olur. Yard\u0131mc\u0131 olabilece\u011fim ba\u015fka bir konu varsa buradayım.',
-  'If size or weight already in history, do NOT ask again. Move to next step.',
-  '',
-  '=== PRODUCT CODE RULE ===',
-  'Always encourage customer to share the product code:',
-  '\u00dcr\u00fcn\u00fcn \u00fczerindeki kodu bize iletirseniz sipari\u015finizi \u00e7ok daha do\u011fru ve eksiksiz bir \u015fekilde olu\u015fturabiliyoruz, bu \u015fekilde yanl\u0131\u015f \u00fcr\u00fcn g\u00f6nderiminin de \u00f6n\u00fcne ge\u00e7mi\u015f oluyoruz.',
-  '',
-  '=== IMAGE REPLY RULE ===',
-  'If customer replies to an image, you cannot see it. Say:',
-  '\u00dcr\u00fcn\u00fcn \u00fczerindeki kodu bize iletirseniz sipari\u015finizi \u00e7ok daha do\u011fru ve eksiksiz bir \u015fekilde olu\u015fturabiliyoruz efendim, bu \u015fekilde yanl\u0131\u015f \u00fcr\u00fcn g\u00f6nderiminin de \u00f6n\u00fcne ge\u00e7mi\u015f oluyoruz \ud83d\ude4f\ud83c\udffb',
-  '',
-  '=== HISTORY RULE ===',
-  'If customer says bunu istiyorum or similar, check history for product code. If found, use it. Do not ask again.',
-  '',
-  '=== OTHER TEAMS (GS, BJK, Trabzon etc.) ===',
-  'Bu sayfam\u0131zda Fenerbah\u00e7e a\u011f\u0131rl\u0131kl\u0131 gidiyoruz. Di\u011fer tak\u0131m modelleri i\u00e7in 0536 630 3654 numaral\u0131 WhatsApp hatt\u0131m\u0131zdan yazarsan\u0131z katalog iletebiliriz.',
-  '',
-  '=== SHIPPING ===',
-  'Carrier: Aras Kargo, ships from Tekirda\u011f.',
-  'Delivery: Ships next day, arrives in 2-3 business days.',
-  '\u015eeffaf Kargo: Kargo g\u00f6revlisi sizi aray\u0131p kap\u0131n\u0131za gelir, paketinizi a\u00e7\u0131p kontrol edersiniz, be\u011fenirseniz \u00f6dersiniz. Takip numaras\u0131 gerekmez.',
-  '',
-  'PTT question: PTT Kargo ile anla\u015fmam\u0131z yok maalesef. Aras Kargo ile g\u00f6nderim sa\u011fl\u0131yoruz. K\u00f6y\u00fcn\u00fcze Aras gelmiyor olabilir, bu durumda en yak\u0131n Aras Kargo \u015fubesinden teslim alabilirsiniz.',
-  'DHL/Yurtici/MNG: Anla\u015fmam\u0131z Aras Kargo ile, \u015fu an sadece bu firma \u00fczerinden g\u00f6nderim yapabiliyoruz.',
-  'Delivery question: Sipari\u015ften sonraki g\u00fcn kargoya veriyoruz, 2-3 i\u015f g\u00fcn\u00fc i\u00e7inde kap\u0131n\u0131zda olur. \u015eeffaf Kargo ile g\u00f6nderiyoruz, \u00fcr\u00fcn\u00fc g\u00f6r\u00fcp \u00f6yle teslim al\u0131yorsunuz.',
-  '',
-  '=== COMMON ANSWERS ===',
-  'Fabric/product content: \u00dcr\u00fcn i\u00e7eri\u011fimiz forma kuma\u015f\u0131d\u0131r. Store \u00fcr\u00fcnlerindeki forma kuma\u015f\u0131n\u0131 kullan\u0131yoruz, tok bir rengi ve dokusu var. Terleme olur elbette hepimiz insan\u0131z, fakat koku yapmaz, benden emin olabilirsiniz.',
-  'Name print: Evet, istedi\u011finiz isim ve numaray\u0131 yaz\u0131yoruz.',
-  'Shrinking: \u00c7ekmez, forma kuma\u015f\u0131.',
-  'Logo: Nak\u0131\u015f i\u015fleme, s\u00f6k\u00fclmez.',
-  'Discount: Fiyatlar\u0131m\u0131z zaten kampanya fiyat\u0131, daha a\u015fa\u011f\u0131 inemeyiz.',
-  'Return: Teslimattan sonra 2 g\u00fcn i\u00e7inde bildirirseniz iade veya de\u011fi\u015fim yap\u0131yoruz.',
-  'Campaign duration: Stoklar s\u0131n\u0131rl\u0131, uzun s\u00fcrmez.',
-  'Location: Tekirda\u011f\u2019dan g\u00f6nderim sa\u011fl\u0131yoruz.',
-  'Kids jersey: 12 ya\u015f ve \u00fczeri \u00e7ocuk formam\u0131z mevcut, forma ve \u015fort tak\u0131m halinde geliyor.',
-  'Kids under 12: Maalesef 12 ya\u015f alt\u0131 \u015fu an mevcut de\u011fil.',
-  'Kids name print (only if asked): Evet, isim ve numara bask\u0131s\u0131 yap\u0131l\u0131yor.',
-  '',
-  '=== SHORT MESSAGE ===',
-  'If customer writes fiyat, var mi, ne kadar, bilgi, forma, katalog, modeller, ikili, set, neler var:',
-  'Output exactly: ###VITRIN_GOSTER###',
-  '',
-  '=== HESITANT CUSTOMER ===',
-  'If customer says dusunecegim, pahali, sonra yazarim:',
-  'Anl\u0131yorum, kap\u0131da \u00f6deme ve \u015feffaf kargo var, \u00fcr\u00fcn\u00fc g\u00f6r\u00fcp \u00f6yle teslim al\u0131yorsunuz. Acele etmenize gerek yok.',
-  '',
-  '=== SHOW CATALOG ===',
-  'If customer asks about price, models, catalog: output exactly: ###VITRIN_GOSTER###',
-  '',
-  '=== ORDER STEPS ===',
-  'STEP 1: Customer asks models -> ###VITRIN_GOSTER###',
-  'STEP 2: Customer picks model -> say: Hangi bedeni haz\u0131rlayal\u0131m?',
-  'STEP 3: Size confirmed -> say exactly this:',
-  'Sipari\u015finizi Olu\u015fturmak i\u00e7in',
-  '',
-  'Ad Soyad',
-  'Adres (\u0130l \u0130l\u00e7e Mahalle)',
-  'Telefon Numaras\u0131',
-  'Beden Bilgisi',
-  '',
-  'Yeterli olacakt\u0131r, ard\u0131ndan sipari\u015finizi olu\u015fturmu\u015f olaca\u011f\u0131z \ud83d\ude4f\ud83c\udffb',
-  '',
-  'STEP 4: After receiving info -> ask: Kap\u0131da \u00f6demeyi nakit mi kart ile mi yapmak istersiniz?',
-  'STEP 5a - CASH: Write order in this exact format:',
-  '[AD SOYAD]',
-  '',
-  '[ADRES]',
-  '',
-  '[TELEFON]',
-  '',
-  '[URUN 1] [BEDEN]',
-  '[URUN 2] [BEDEN]',
-  '',
-  'Toplam: [FIYAT] TL - Kap\u0131da Nakit \u00d6deme',
-  '',
-  'Then ask: Onaylayor musunuz?',
-  '',
-  'STEP 5b - CARD: Write order in same format but add:',
-  '1.250 TL',
-  '+50 TL Pos Cihaz\u0131 Hizmet Bedeli',
-  'Toplam: 1.300 TL - Kap\u0131da Kart \u00d6deme',
-  '',
-  'Then ask: Onaylayor musunuz?',
-  '',
-  '=== ORDER CLOSING - ONLY when customer says evet, onayliyorum, olur ===',
-  'Say exactly:',
-  'Sipari\u015finizi b\u00fcy\u00fck bir heyecan ve emekle haz\u0131rlay\u0131p kargoya teslim edece\u011fiz. Sizin i\u00e7in \u00f6zenle haz\u0131rlanan bu paketi kargodan teslim alman\u0131z, eme\u011fimize verece\u011finiz en g\u00fczel kar\u015f\u0131l\u0131k olacakt\u0131r. Sevgi ve minnettarl\u0131kla, sa\u011fl\u0131cakla kal\u0131n efendim.',
-  'Then output: ###SIPARIS_BASLA### {"ad_soyad": "","telefon": "","adres": "","urun": "","toplam": ""} ###SIPARIS_BITIS###',
-].join('\n');
+const KOD_MESAJI = 'Urun secimlerinizi bizlere kodlarini soyleyerek yapmanizi rica ediyoruz. Bu sayede urunuzun yanlıs ya da sorunlu gelmesini onluyoruz. Her gorselin uzerinde 4 haneli bir urun kodu bulunmaktadir. Ornek: 0021, 0022, 0023 gibi. Istediginiz urunun kodunu bize iletmeniz yeterlidir.';
 
-const VITRIN_METNI = 'Kargo Dahil 1 Adet 630\u20BA\n2 Adet Forma 1.250\u20BA\n\n2 Al 1 Hediye Kampanyas\u0131nda 1.250\u20BA\n2 Forma Al 1.250\u20BA \u00d6de, 1 Forma Bizden Hediye!\nToplam 3 Forma Kap\u0131na Gelir!\n\nKap\u0131da \u00d6deme \u015eeffaf Kargo \u0130le G\u00f6nderim Sa\u011fl\u0131yoruz \ud83d\ude4f\ud83c\udffb\n\u00dcr\u00fcn\u00fc G\u00f6r\u00fcp \u00d6yle Teslim Al\u0131yorsunuz \ud83d\udc4d';
+const KART = 'Kartla odemelerde kargo firmalari Pos Cihazi Hizmet Bedeli adi altinda +50 TL ekstra bir ucret cikartıyor. Sizler icin en uygunu nakit olmasidır, o sekilde nakit olarak sisteme girecegiz.';
 
-async function telegramaBildirimGonder(siparis) {
-  try {
-    if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
-    const mesaj = 'YEN\u0130 S\u0130PAR\u0130\u015e!\n\nAd Soyad: ' + siparis.ad_soyad + '\nTelefon: ' + siparis.telefon + '\nAdres: ' + siparis.adres + '\nUrun: ' + siparis.urun + '\nToplam: ' + siparis.toplam + ' TL';
-    await axios.post('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
-      chat_id: TELEGRAM_CHAT_ID,
-      text: mesaj,
-    });
-  } catch (err) {
-    console.error('Telegram error:', err.message);
-  }
+// Gorsel gidip gitmedigini history'den kontrol et
+function gorselGittiMi(hist) {
+  return hist.some(function(m) {
+    return m.role === 'assistant' && m.content && m.content.indexOf('GORSEL_GONDERILDI') !== -1;
+  });
 }
 
-function siparisiParsEt(metin) {
-  try {
-    const match = metin.match(/###SIPARIS_BASLA###([\s\S]*?)###SIPARIS_BITIS###/);
-    if (match) return JSON.parse(match[1].trim());
-  } catch (err) {}
+function kartGittiMi(hist) {
+  return hist.some(function(m) {
+    return m.role === 'assistant' && m.content && m.content.indexOf('Pos Cihazi Hizmet Bedeli') !== -1;
+  });
+}
+
+function getK(id) {
+  if (!K[id]) K[id] = { hist: [], busy: false, queue: [], timer: null };
+  return K[id];
+}
+
+function isimCevir(t) {
+  Object.keys(ISIMLER).forEach(function(k) { t = t.replace(new RegExp(k, 'g'), ISIMLER[k]); });
+  return t;
+}
+
+function kartVar(m) {
+  return ['kart', 'kard', 'kartla', 'karta', 'kredi'].some(function(k) { return m.toLowerCase().indexOf(k) !== -1; });
+}
+
+function parseSiparis(t) {
+  try { var m = t.match(/###SIPARIS_BASLA###([\s\S]*?)###SIPARIS_BITIS###/); if (m) return JSON.parse(m[1].trim()); } catch (e) {}
   return null;
 }
 
-app.get('/webhook', function(req, res) {
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
-  if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-    res.status(200).send(challenge);
-  } else {
-    res.status(403).send('Error');
+async function tgGonder(s) {
+  try {
+    if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
+    var u = isimCevir(s.urun.toUpperCase());
+    await axios.post('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
+      chat_id: TELEGRAM_CHAT_ID,
+      text: 'YEN\u0130 S\u0130PAR\u0130\u015e!\n\nAD: ' + s.ad_soyad.toUpperCase() + '\nTEL: ' + s.telefon + '\nADRES: ' + s.adres.toUpperCase() + '\nURUN: ' + u + '\nTOPLAM: ' + s.toplam + ' TL',
+    });
+  } catch (e) { console.error('tg err:', e.message); }
+}
+
+async function igMsg(id, txt) {
+  try {
+    await axios.post('https://graph.instagram.com/v21.0/me/messages',
+      { recipient: { id: id }, message: { text: txt } },
+      { headers: { Authorization: 'Bearer ' + IG_ACCESS_TOKEN, 'Content-Type': 'application/json' } });
+  } catch (e) { console.error('msg err:', e.message); }
+}
+
+async function igImg(id, url) {
+  try {
+    await axios.post('https://graph.instagram.com/v21.0/me/messages',
+      { recipient: { id: id }, message: { attachment: { type: 'image', payload: { url: url, is_reusable: true } } } },
+      { headers: { Authorization: 'Bearer ' + IG_ACCESS_TOKEN, 'Content-Type': 'application/json' } });
+  } catch (e) { console.error('img err:', e.message); }
+}
+
+function wait(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
+
+async function aiCall(hist) {
+  try {
+    // History'den GORSEL_GONDERILDI flagini temizle AI'a gondermeden once
+    var temizHist = hist.map(function(m) {
+      return { role: m.role, content: m.content.replace('GORSEL_GONDERILDI', '').trim() };
+    });
+    var r = await axios.post('https://api.anthropic.com/v1/messages',
+      { model: 'claude-haiku-4-5-20251001', max_tokens: 600, system: PROMPT, messages: temizHist },
+      { headers: { 'x-api-key': CLAUDE_API_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' } });
+    return r.data.content[0].text;
+  } catch (e) { return 'Su an teknik bir sorun var, birazdan tekrar yazabilirsiniz.'; }
+}
+
+async function process(id) {
+  var u = getK(id);
+  if (u.busy || u.queue.length === 0) return;
+  u.busy = true;
+
+  var msgs = u.queue.slice();
+  u.queue = [];
+
+  var uniq = [];
+  var prev = '';
+  msgs.forEach(function(m) {
+    var t = m.trim().toLowerCase();
+    if (t !== prev) { uniq.push(m); prev = t; }
+  });
+  var combined = uniq.join(' ').trim();
+  if (!combined) { u.busy = false; return; }
+
+  var isFirst = u.hist.length === 0;
+  var gorselGitti = gorselGittiMi(u.hist);
+  var kartGitti = kartGittiMi(u.hist);
+
+  // GORSEL - sadece hic gonderilmediyse gonder
+  if (isFirst && !gorselGitti) {
+    await igMsg(id, VITRIN);
+    for (var i = 0; i < GORSELLER.length; i++) {
+      await igImg(id, GORSELLER[i]);
+      await wait(600);
+    }
+    await wait(500);
+    await igMsg(id, KOD_MESAJI);
+    // Gorsel giddigini history'e kaydet
+    u.hist.push({ role: 'user', content: combined });
+    u.hist.push({ role: 'assistant', content: 'GORSEL_GONDERILDI ' + VITRIN });
+    u.busy = false;
+    if (u.queue.length > 0) await process(id);
+    return;
   }
+
+  // Kart uyarisi
+  if (kartVar(combined) && !kartGitti) {
+    await igMsg(id, KART);
+    u.hist.push({ role: 'user', content: combined });
+    u.hist.push({ role: 'assistant', content: KART });
+    u.busy = false;
+    if (u.queue.length > 0) await process(id);
+    return;
+  }
+
+  // 0022 stok uyarisi - 22 Mayis 2026 oncesi
+  var bugun = new Date();
+  var sinir = new Date('2026-05-22T00:00:00');
+  var sariKelimeler = ['0022', 'sari forma', 'sarı forma', 'retro sari', 'retro sarı'];
+  var sariVar = sariKelimeler.some(function(k) { return combined.toLowerCase().indexOf(k) !== -1; });
+  if (bugun < sinir && sariVar && !sariGitti) {
+    var sariMesaj = 'Bu ayin 22\'sinde Cuma gunu stogümuza gelecek, onumuzdeki gunlerde Kurban Bayrami oldugu icin gonderimini bayramdan sonra saglayabilecegiz efendim. Dilerseniz sari forma yerine farkli bir model secebilirsiniz, ya da sectiginiz bir modelden iki adet gonderebiliriz. Bekleriz diyorsaniz ayin 22\'sinden sonra sizlere gonderimini saglariz.';
+    await igMsg(id, sariMesaj);
+    u.hist.push({ role: 'user', content: combined });
+    u.hist.push({ role: 'assistant', content: sariMesaj });
+    u.busy = false;
+    if (u.queue.length > 0) await process(id);
+    return;
+  }
+
+  u.hist.push({ role: 'user', content: combined });
+  if (u.hist.length > 20) {
+    // GORSEL_GONDERILDI flagini her zaman koru
+    var gorselMesaj = u.hist.find(function(m) { return m.role === 'assistant' && m.content && m.content.indexOf('GORSEL_GONDERILDI') !== -1; });
+    u.hist = u.hist.slice(-20);
+    if (gorselMesaj && !gorselGittiMi(u.hist)) {
+      u.hist.unshift(gorselMesaj);
+    }
+  }
+
+  var reply = await aiCall(u.hist);
+  var clean = reply.replace(/###SIPARIS_BASLA###[\s\S]*?###SIPARIS_BITIS###/g, '').trim();
+  u.hist.push({ role: 'assistant', content: clean });
+
+  var siparis = parseSiparis(reply);
+
+  // Once musteri mesaji git
+  await igMsg(id, clean);
+
+  // Siparis onaylandiysa Telegram + bayram uyarisi
+  if (siparis && siparis.ad_soyad) {
+    await tgGonder(siparis);
+    // Bayram gecikme uyarisi 20-29 Mayis
+    var bayramBaslangic = new Date('2026-05-20T00:00:00');
+    var bayramBitis = new Date('2026-05-29T23:59:59');
+    if (bugun >= bayramBaslangic && bugun <= bayramBitis) {
+      await wait(500);
+      await igMsg(id, 'Efendim biliyorsunuz Kurban Bayrami yaklasıyor, bu tarihlerde kargo firmalarının tatil olması nedeniyle siparisıniz gecikebilir. Bu durum sizin icin uygun mu?');
+    }
+  }
+
+  u.busy = false;
+  if (u.queue.length > 0) await process(id);
+}
+
+const PROMPT = [
+  'You are a sales rep for a jersey store. Instagram DM. ALWAYS respond in Turkish.',
+  '',
+  'IDENTITY: Real human. Never reveal AI. Never invent name. Never say store name.',
+  '',
+  'LANGUAGE: Always formal siz/sizin/size. Never sen/sana.',
+  '"efendim" max once per response, only at sentence start, not every sentence.',
+  'SHORT. Max 2-3 sentences. No bullets. No bold.',
+  '',
+  'ABSOLUTE FORBIDDEN:',
+  'Harika secim, Mukemmel, Guzel secim, Sevincle, Mutluluk duyarim, Tesekkur ederiz.',
+  'Never comment on product choice. Never push to order.',
+  'Never say Hos geldiniz mid-chat. Never repeat questions. Never invent info.',
+  'Never mention +50 TL yourself. Never say urunleri kontrol ederek alabilirsiniz.',
+  '',
+  'IMAGE RULE - ABSOLUTE STRICT:',
+  'Images are sent ONCE at the very start by system. NEVER again.',
+  'If customer asks to see images/products again: say EXACTLY:',
+  '"Sohbetimizin basinda tum modellerimizi sizinle paylassmıstık efendim, yukarı kaydırarak gorsellere ulasabilirsiniz."',
+  'NEVER send images. NEVER suggest sending images.',
+  '',
+  'PRICE RULE - STRICT:',
+  'If customer asks about price or campaign at ANY point:',
+  'ONLY write: Kargo Dahil 1 Adet 630 TL, 2 Adet 1.250 TL, 2 Al 1 Hediye kampanyasinda 1.250 TL odeyip toplam 3 forma alabilirsiniz, 4 Adet 1.750 TL.',
+  'Nothing else. No images. No catalog.',
+  '',
+  'SIZE RULE - STRICT:',
+  'If customer asks about size availability (XXL var mi, S beden var mi etc):',
+  'ONLY answer the size question in text. Example: "Evet XXL bedenimiz mevcut efendim."',
+  'NEVER send images for size questions.',
+  '',
+  'GREETING (first msg only):',
+  '06-12: Gunaydın efendim, nasil yardimci olabilirim?',
+  '12-18: Iyi gunler efendim, nasil yardimci olabilirim?',
+  '18-06: Iyi aksamlar efendim, nasil yardimci olabilirim?',
+  'If history exists: skip greeting.',
+  '',
+  'DOTS/FRAGMENTS: If customer sends . .. ... emojis or fragments:',
+  '"Ilettigimiz gorseller uzerindeki kodlari bizlere iletirseniz cok daha saglıklı ve dogru bir siparis vermis olacaksınız."',
+  '',
+  'REMINDER: "Bizlere siz yazarsanız cok mutlu oluruz, gun icerisinde bir cok musterimiz ile etkilesim halindeyiz, insanlık hali unutabiliyoruz."',
+  '',
+  'SHARED POST: "Efendim, daha saglıklı yardimci olabilmem icin ekran fotografı atar misiniz?"',
+  '',
+  'PRODUCTS (UPPERCASE FULL NAME ALWAYS):',
+  '0011 -> GS LION TASARIM FORMASI',
+  '0012 -> GS RETRO SARI FORMASI',
+  '0013 -> GS RETRO KIRMIZI FORMASI',
+  '0014 -> GS YESIL TASARIM FORMASI',
+  'ADULT jerseys: NO shorts. Only forma.',
+  'If asked about adult shorts: "Yetiskin formalarinda sort bulunmamaktadir, sadece forma olarak gonderim yapılıyor."',
+  'Kids 12+: forma + sort takim. Kids <12: yok. Kids socks: yok. Kids print: sadece sorulursa.',
+  '',
+  'STOCK: "Efendim guncel modellerimiz bu sekildedir, bunlarin haricinde ekstra bir modelimiz yoktur."',
+  '',
+  'PRICES: 1->630TL | 2->1250TL | Campaign: 2 al 1250TL ode 1 hediye toplam 3 | 4->1750TL',
+  '3 al 2 ode = 2 al 1 hediye, ayni kampanya.',
+  'If 2 selected asks gift: "Efendim dilediginiz 3. bir forma kodunu iletirseniz siparisınize ekleyelim."',
+  '',
+  'SIZE (weight only): 55-65->S | 66-75->M | 76-85->L | 86-95->XL | 96+->XXL',
+  'If asked about fit: "Standart forma kalibindadir. Boy ve kilonuzu paylasırsaniz beden konusunda yardimci olabilirim."',
+  'After height/weight: "Boyunuza ve kilonuza gore sizlere X beden onerebiliriz efendim."',
+  'If size known: skip.',
+  '',
+  'DELIVERY: No order yet->ask city. After city: "2-3 is gunu icerisinde sizde olur efendim." After order: direct.',
+  '',
+  'RETURN: "Urun sizlere ulastiktan sonra 2 gun icerisinde sorun yasarsaniz bizlere ulasabilirsiniz, bu konuda yardimci oluruz."',
+  '',
+  'CODE RULE: After product selected: "Urunun uzerindeki kodu bize iletirseniz siparisınizi cok daha dogru ve eksiksiz olusturabiliyoruz."',
+  '',
+  'IMAGE REPLY: "Ilettigimiz gorseller uzerindeki kodlari bizlere iletirseniz cok daha saglıklı ve dogru siparis vermis olacaksınız efendim."',
+  '',
+  'OTHER TEAMS: "Bu sayfamizda Galatasaray agırlıklı gidiyoruz. Diger modeller icin 0536 630 3654 WhatsApp hattimizdan katalog iletebiliriz."',
+  'HOW MANY: Ask Galatasaray mi baska mi. GS: guncel bunlar. Other: WhatsApp.',
+  '',
+  'SHIPPING:',
+  'Seffaf Kargo: "Seffaf paketleme ile gonderiyoruz, kurye kapınıza geldiginde urun icerigi disaridan gorunur sekilde teslim edilir."',
+  'NEVER say musteri paketi acip kontrol edebilir.',
+  'PTT: anlassmamiz yok, en yakin Aras subesi.',
+  'Other cargo: sadece Aras.',
+  '',
+  'COMMON: Fabric: forma kumasi koku yapmaz. Name: evet. Shrink: cekmez. Logo: nakis sokulnez.',
+  'Discount: kampanya fiyati. Hesitant: "Yardimci olmami istediginiz bir konu varsa buradayim."',
+  '',
+  'ORDER STEPS:',
+  'S1: images sent auto.',
+  'S2: customer gives code -> UPPERCASE NAME. Ask: "Beden olarak hangisini tercih edersiniz?"',
+  'S3: size -> send form: "Siparisınizi Olusturmak Icin\n\nAd Soyad\nAdres (Il Ilce Mahalle)\nTelefon Numarasi\nBeden Bilgisi\n\nYeterli olacaktir."',
+  'S4: info -> ask: "Kapida odemeyi nakit mi kart ile mi yapmak istersiniz?"',
+  'S5: system handles card warning.',
+  'CASH (ALL CAPS): [AD]\n\n[ADRES]\n\n[TEL]\n\n[URUN FULL NAME] [BEDEN]\n\nTOPLAM: X TL - KAPIDA NAKIT ODEME\n\nOnaylıyor musunuz?',
+  'CARD (ALL CAPS after confirm): same + +50 TL POS CIHAZI HIZMET BEDELI.',
+  '',
+  'ORDER START: If customer says siparis vermek istiyorum:',
+  '"Tabii efendim, yukarida ilettigimiz gorsellerin uzerindeki kodlardan hangi urunleri istediginizi yazabilirsiniz."',
+  '',
+  'CLOSING (only evet/onayliyorum/olur):',
+  '"Siparisınizi buyuk bir heyecan ve emekle hazırlayıp kargoya teslim edecegiz. Sizin icin ozenle hazırlanan bu paketi kargodan teslim almanız, emegimize verecegıniz en guzel karsilık olacaktır. Sevgi ve minnettarlıkla, saglıcakla kalın efendim."',
+  'Output: ###SIPARIS_BASLA### {"ad_soyad":"","telefon":"","adres":"","urun":"","toplam":""} ###SIPARIS_BITIS###',
+].join('\n');
+
+app.get('/webhook', function(req, res) {
+  if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === VERIFY_TOKEN) {
+    res.status(200).send(req.query['hub.challenge']);
+  } else { res.status(403).send('Error'); }
 });
 
 app.post('/webhook', async function(req, res) {
   res.status(200).send('OK');
   try {
-    const body = req.body;
-    if (body.object !== 'instagram') return;
-    for (let i = 0; i < body.entry.length; i++) {
-      const entry = body.entry[i];
-      const messaging = entry.messaging || [];
-      for (let j = 0; j < messaging.length; j++) {
-        const event = messaging[j];
-        const senderId = event.sender && event.sender.id;
-        const messageText = event.message && event.message.text;
-        if (!senderId || !messageText) continue;
-        if (event.message && event.message.is_echo) continue;
+    if (req.body.object !== 'instagram') return;
+    for (var i = 0; i < req.body.entry.length; i++) {
+      var msgs = req.body.entry[i].messaging || [];
+      for (var j = 0; j < msgs.length; j++) {
+        var ev = msgs[j];
+        var sid = ev.sender && ev.sender.id;
+        var txt = ev.message && ev.message.text;
+        if (!sid || !txt) continue;
+        if (ev.message && ev.message.is_echo) continue;
 
-        if (!konusmalar[senderId]) konusmalar[senderId] = [];
-        konusmalar[senderId].push({ role: 'user', content: messageText });
-        if (konusmalar[senderId].length > 20) {
-          konusmalar[senderId] = konusmalar[senderId].slice(-20);
+        var u = getK(sid);
+
+        // Ayni message ID tekrar geldiyse tamamen atla (reklama 2 kez tiklanma)
+        var msgId = ev.message && ev.message.mid;
+        if (msgId) {
+          if (islenenMesajlar.has(msgId)) continue;
+          islenenMesajlar.add(msgId);
+          // 10 dakika sonra temizle
+          setTimeout(function() { islenenMesajlar.delete(msgId); }, 600000);
         }
 
-        const yanit = await claudeYanitAl(konusmalar[senderId]);
+        var last = u.queue.length > 0 ? u.queue[u.queue.length - 1].trim().toLowerCase() : '';
+        if (txt.trim().toLowerCase() === last) continue;
 
-        const temizYanit = yanit
-          .replace(/###SIPARIS_BASLA###[\s\S]*?###SIPARIS_BITIS###/g, '')
-          .replace(/###VITRIN_GOSTER###/g, '')
-          .trim();
-
-        konusmalar[senderId].push({ role: 'assistant', content: temizYanit });
-
-        const siparis = siparisiParsEt(yanit);
-        if (siparis && siparis.ad_soyad) {
-          await telegramaBildirimGonder(siparis);
-        }
-
-        if (yanit.indexOf('###VITRIN_GOSTER###') !== -1) {
-          await instagramaMesajGonder(senderId, VITRIN_METNI);
-          for (let k = 0; k < TUM_GORSELLER.length; k++) {
-            await instagramaGorselGonder(senderId, TUM_GORSELLER[k]);
-            await bekle(500);
-          }
-        } else {
-          await instagramaMesajGonder(senderId, temizYanit);
-        }
+        u.queue.push(txt);
+        if (u.timer) clearTimeout(u.timer);
+        (function(id) {
+          u.timer = setTimeout(async function() {
+            u.timer = null;
+            await process(id);
+          }, 3000);
+        })(sid);
       }
     }
-  } catch (err) {
-    console.error('Error:', err.message);
-  }
+  } catch (e) { console.error('webhook err:', e.message); }
 });
 
-async function claudeYanitAl(mesajlar) {
-  try {
-    const response = await axios.post(
-      'https://api.anthropic.com/v1/messages',
-      {
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 500,
-        system: SISTEM_PROMPT,
-        messages: mesajlar,
-      },
-      {
-        headers: {
-          'x-api-key': CLAUDE_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-    return response.data.content[0].text;
-  } catch (err) {
-    console.error('Claude error:', err.message);
-    return '\u015eu an teknik bir sorun var, birazdan tekrar yazabilirsiniz.';
-  }
-}
-
-async function instagramaMesajGonder(aliciId, mesaj) {
-  try {
-    await axios.post(
-      'https://graph.instagram.com/v21.0/me/messages',
-      { recipient: { id: aliciId }, message: { text: mesaj } },
-      { headers: { Authorization: 'Bearer ' + IG_ACCESS_TOKEN, 'Content-Type': 'application/json' } }
-    );
-  } catch (err) {
-    console.error('Message error:', err.message);
-  }
-}
-
-async function instagramaGorselGonder(aliciId, gorselUrl) {
-  try {
-    await axios.post(
-      'https://graph.instagram.com/v21.0/me/messages',
-      {
-        recipient: { id: aliciId },
-        message: { attachment: { type: 'image', payload: { url: gorselUrl, is_reusable: true } } },
-      },
-      { headers: { Authorization: 'Bearer ' + IG_ACCESS_TOKEN, 'Content-Type': 'application/json' } }
-    );
-  } catch (err) {
-    console.error('Image error:', err.message);
-  }
-}
-
-function bekle(ms) {
-  return new Promise(function(resolve) { setTimeout(resolve, ms); });
-}
-
-const PORT = process.env.PORT || 3000;
+var PORT = process.env.PORT || 3000;
 app.listen(PORT, function() { console.log('Bot running on port ' + PORT); });
