@@ -31,7 +31,7 @@ const ISIMLER = {
 
 const VITRIN = 'Kargo Dahil 1 Adet 630\u20BA\n2 Adet Forma 1.250\u20BA\n\n2 Al 1 Hediye Kampanyas\u0131nda 1.250\u20BA\n2 Forma Al\u0131n 1.250\u20BA \u00d6deyin, 1 Forma Bizden Hediye!\nToplam 3 Forma Kap\u0131n\u0131za Gelir!\n\nKap\u0131da \u00d6deme \u015eeffaf Kargo \u0130le G\u00f6nderim Sa\u011fl\u0131yoruz \ud83d\ude4f\ud83c\udffb\n\u00dcr\u00fcn\u00fc G\u00f6r\u00fcp \u00d6yle Teslim Al\u0131yorsunuz \ud83d\udc4d';
 
-const KOD_MESAJI = 'Urun secimlerinizi bizlere kodlarini soyleyerek yapmanizi rica ediyoruz. Bu sayede urunuzun yanlıs ya da sorunlu gelmesini onluyoruz. (ORNEK KOD: 0021) Bu sekilde bizlere istediginiz urun kodlarini iletebilirsiniz.';
+const KOD_MESAJI = 'Urun secimlerinizi bizlere kodlarini soyleyerek yapmanizi rica ediyoruz. Bu sayede urunuzun yanlıs ya da sorunlu gelmesini onluyoruz. Her gorselin uzerinde 4 haneli bir urun kodu bulunmaktadir. Ornek: 0021, 0022, 0023 gibi. Istediginiz urunun kodunu bize iletmeniz yeterlidir.';
 
 const KART = 'Kartla odemelerde kargo firmalari Pos Cihazi Hizmet Bedeli adi altinda +50 TL ekstra bir ucret cikartıyor. Sizler icin en uygunu nakit olmasidır, o sekilde nakit olarak sisteme girecegiz.';
 
@@ -45,12 +45,6 @@ function gorselGittiMi(hist) {
 function kartGittiMi(hist) {
   return hist.some(function(m) {
     return m.role === 'assistant' && m.content && m.content.indexOf('Pos Cihazi Hizmet Bedeli') !== -1;
-  });
-}
-
-function sariUyariGittiMi(hist) {
-  return hist.some(function(m) {
-    return m.role === 'assistant' && m.content && m.content.indexOf('Cuma gunu stog') !== -1;
   });
 }
 
@@ -135,7 +129,6 @@ async function process(id) {
   var isFirst = u.hist.length === 0;
   var gorselGitti = gorselGittiMi(u.hist);
   var kartGitti = kartGittiMi(u.hist);
-  var sariGitti = sariUyariGittiMi(u.hist);
 
   // GORSEL - sadece hic gonderilmediyse gonder
   if (isFirst && !gorselGitti) {
@@ -180,13 +173,25 @@ async function process(id) {
   }
 
   u.hist.push({ role: 'user', content: combined });
-  if (u.hist.length > 20) u.hist = u.hist.slice(-20);
+  if (u.hist.length > 20) {
+    // GORSEL_GONDERILDI flagini her zaman koru
+    var gorselMesaj = u.hist.find(function(m) { return m.role === 'assistant' && m.content && m.content.indexOf('GORSEL_GONDERILDI') !== -1; });
+    u.hist = u.hist.slice(-20);
+    if (gorselMesaj && !gorselGittiMi(u.hist)) {
+      u.hist.unshift(gorselMesaj);
+    }
+  }
 
   var reply = await aiCall(u.hist);
   var clean = reply.replace(/###SIPARIS_BASLA###[\s\S]*?###SIPARIS_BITIS###/g, '').trim();
   u.hist.push({ role: 'assistant', content: clean });
 
   var siparis = parseSiparis(reply);
+
+  // Once musteri mesaji git
+  await igMsg(id, clean);
+
+  // Siparis onaylandiysa Telegram + bayram uyarisi
   if (siparis && siparis.ad_soyad) {
     await tgGonder(siparis);
     // Bayram gecikme uyarisi 20-29 Mayis
@@ -194,11 +199,9 @@ async function process(id) {
     var bayramBitis = new Date('2026-05-29T23:59:59');
     if (bugun >= bayramBaslangic && bugun <= bayramBitis) {
       await wait(500);
-      await igMsg(id, 'Efendim biliyorsunuz malum Kurban Bayrami yaklasıyor, bu durumlarda siparisıniz gecikebilir. Bunun nedeni kargo firmalarının tatil olmasından dolayı bu tarz gecikmeler yasanabilir ve elinize gec ulasabilir. Bu durum sizler icin bir sorun teskil ediyor mu?');
+      await igMsg(id, 'Efendim biliyorsunuz Kurban Bayrami yaklasıyor, bu tarihlerde kargo firmalarının tatil olması nedeniyle siparisıniz gecikebilir. Bu durum sizin icin uygun mu?');
     }
   }
-
-  await igMsg(id, clean);
 
   u.busy = false;
   if (u.queue.length > 0) await process(id);
