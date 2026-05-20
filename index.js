@@ -11,6 +11,7 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 const K = {};
+const islenenMesajlar = new Set();
 
 const GORSELLER = [
   'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891830/BJK_BEYAZ_RETRO_vybc1r.jpg',
@@ -52,19 +53,22 @@ const PROMPT = [
   'Never mention +50 TL yourself. Never say urunleri kontrol ederek alabilirsiniz.',
   'NEVER send or suggest sending images again after they have been sent once.',
   '',
+  '=== IMAGE RULE - ABSOLUTE ===',
+  'Images are sent ONCE at the very start by the system. NEVER suggest sending again.',
+  'If customer asks to see images/products again: say EXACTLY:',
+  '"Sohbetimizin basinda tum modellerimizi sizinle paylasmistik efendim, yukari kaydirarak gorsellere ulasabilirsiniz."',
+  'NEVER output ###VITRIN_GOSTER### if images have already been sent (history exists).',
+  '',
   '=== GREETING (first msg only) ===',
   '06-12: Gunaydın efendim, nasil yardimci olabilirim?',
   '12-18: Iyi gunler efendim, nasil yardimci olabilirim?',
   '18-06: Iyi aksamlar efendim, nasil yardimci olabilirim?',
   'If history exists: skip greeting.',
   '',
-  '=== PRICE/CAMPAIGN QUESTION - CRITICAL ===',
-  'If customer asks about price or campaign AND images have already been sent (there is history):',
+  '=== PRICE/CAMPAIGN QUESTION ===',
+  'If customer asks about price or campaign AND history exists (images already sent):',
   'ONLY write the price text. Do NOT mention images. Do NOT output ###VITRIN_GOSTER###.',
   'Just write: Kargo Dahil 1 Adet 630TL, 2 Adet 1.250TL, 2 Al 1 Hediye kampanyasinda 1.250TL odeyip toplam 3 forma alabilirsiniz, 4 Adet 1.750TL.',
-  '',
-  'If customer asks about price AND images have NOT been sent yet (no history or first interaction):',
-  'Output: ###VITRIN_GOSTER###',
   '',
   '=== ORDER START RULE ===',
   'If customer says siparis vermek istiyorum or similar:',
@@ -87,7 +91,6 @@ const PROMPT = [
   '0023/FB GRI TASARIM -> FB GRI TASARIM FORMASI',
   '0024/FB PALAMUT SARI -> FB PALAMUT SARI FORMASI',
   '0025/FB PALAMUT LACIVERT -> FB PALAMUT LACIVERT FORMASI',
-  'All: forma + sort takim halinde.',
   '',
   '=== STOCK ===',
   '"Efendim guncel modellerimiz bu sekildedir, bunlarin haricinde ekstra bir modelimiz yoktur."',
@@ -102,7 +105,7 @@ const PROMPT = [
   'If 2 selected asks gift: "Efendim dilediginiz 3. bir forma kodunu iletirseniz siparisınize ekleyelim."',
   '3 al 2 ode = 2 al 1 hediye, ayni kampanya.',
   '',
-  '=== SIZE - IMPORTANT ===',
+  '=== SIZE ===',
   'When asking about size, say: "Beden olarak hangisini tercih edersiniz?"',
   'If customer asks about fit/kalip: "Standart forma kalibindadir. Boy ve kilonuzu paylasırsaniz beden konusunda yardimci olabilirim."',
   'After customer gives height/weight: "Boyunuza ve kilonuza gore sizlere X beden onerebiliriz efendim."',
@@ -143,7 +146,7 @@ const PROMPT = [
   'Hesitant: "Yardimci olmami istediginiz bir konu varsa buradayim."',
   '',
   '=== ORDER STEPS ===',
-  'S1: images+vitrin sent auto.',
+  'S1: images+vitrin sent auto by system.',
   'S2: customer gives code -> translate to UPPERCASE NAME. Ask: "Beden olarak hangisini tercih edersiniz?"',
   'S3: size -> send form:',
   '"Siparisınizi Olusturmak Icin\n\nAd Soyad\nAdres (Il Ilce Mahalle)\nTelefon Numarasi\nBeden Bilgisi\n\nYeterli olacaktir, ardindan siparisınizi olusturmus olacagiz."',
@@ -157,8 +160,9 @@ const PROMPT = [
   'Output: ###SIPARIS_BASLA### {"ad_soyad":"","telefon":"","adres":"","urun":"","toplam":""} ###SIPARIS_BITIS###',
 ].join('\n');
 
+// --- YARDIMCI FONKSİYONLAR ---
+
 function getK(id) {
-  if (!K[id]) K[id] = { hist: [], gorselGitti: false, kartGitti: false, busy: false, queue: [], timer: null };
   if (!K[id]) K[id] = { hist: [], gorselGitti: false, kartGitti: false, sariUyariGitti: false, busy: false, queue: [], timer: null };
   return K[id];
 }
@@ -173,9 +177,16 @@ function kartVar(m) {
 }
 
 function parseSiparis(t) {
-  try { var m = t.match(/###SIPARIS_BASLA###([\s\S]*?)###SIPARIS_BITIS###/); if (m) return JSON.parse(m[1].trim()); } catch (e) {}
+  try {
+    var m = t.match(/###SIPARIS_BASLA###([\s\S]*?)###SIPARIS_BITIS###/);
+    if (m) return JSON.parse(m[1].trim());
+  } catch (e) {}
   return null;
 }
+
+function wait(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
+
+// --- API FONKSİYONLARI ---
 
 async function tgGonder(s) {
   try {
@@ -204,8 +215,6 @@ async function igImg(id, url) {
   } catch (e) { console.error('img err:', e.message); }
 }
 
-function wait(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
-
 async function aiCall(hist) {
   try {
     var r = await axios.post('https://api.anthropic.com/v1/messages',
@@ -215,6 +224,8 @@ async function aiCall(hist) {
   } catch (e) { return 'Su an teknik bir sorun var, birazdan tekrar yazabilirsiniz.'; }
 }
 
+// --- ANA PROCESS FONKSİYONU ---
+
 async function process(id) {
   var u = getK(id);
   if (u.busy || u.queue.length === 0) return;
@@ -223,6 +234,7 @@ async function process(id) {
   var msgs = u.queue.slice();
   u.queue = [];
 
+  // Tekrar eden mesajları temizle
   var uniq = [];
   var prev = '';
   msgs.forEach(function(m) {
@@ -234,7 +246,7 @@ async function process(id) {
 
   var isFirst = u.hist.length === 0;
 
-  // GORSEL SADECE 1 KEZ - ilk mesajda ve gorselGitti false ise
+  // 1) GÖRSEL - sadece ilk mesajda, 1 kez
   if (isFirst && !u.gorselGitti) {
     u.gorselGitti = true;
     await igMsg(id, VITRIN);
@@ -251,7 +263,7 @@ async function process(id) {
     return;
   }
 
-  // Kart uyarisi
+  // 2) KART UYARISI - sadece 1 kez
   if (kartVar(combined) && !u.kartGitti) {
     u.kartGitti = true;
     await igMsg(id, KART);
@@ -262,7 +274,7 @@ async function process(id) {
     return;
   }
 
-  // 0022 STOK KURALI - 22 Mayis 2026 oncesi gecerli
+  // 3) 0022 SARI FORMA STOK UYARISI - 22 Mayıs 2026 öncesi, sadece 1 kez
   var bugun = new Date();
   var sinir = new Date('2026-05-22T00:00:00');
   var sariKelimeler = ['0022', 'sari forma', 'sarı forma', 'retro sari', 'retro sarı'];
@@ -278,29 +290,27 @@ async function process(id) {
     return;
   }
 
+  // 4) NORMAL AI AKIŞI
   u.hist.push({ role: 'user', content: combined });
   if (u.hist.length > 20) u.hist = u.hist.slice(-20);
 
   var reply = await aiCall(u.hist);
-  var clean = reply.replace(/###SIPARIS_BASLA###[\s\S]*?###SIPARIS_BITIS###/g, '').replace(/###VITRIN_GOSTER###/g, '').trim();
+  var clean = reply
+    .replace(/###SIPARIS_BASLA###[\s\S]*?###SIPARIS_BITIS###/g, '')
+    .replace(/###VITRIN_GOSTER###/g, '')
+    .trim();
+
   u.hist.push({ role: 'assistant', content: clean });
 
+  await igMsg(id, clean);
+
+  // 5) SİPARİŞ ONAYLANDIYSA TELEGRAM + BAYRAM UYARISI
   var siparis = parseSiparis(reply);
-  if (siparis && siparis.ad_soyad) await tgGonder(siparis);
-
-  // ###VITRIN_GOSTER### sadece fiyat metnini gonder - GORSEL ASLA
-  if (reply.indexOf('###VITRIN_GOSTER###') !== -1) {
-    await igMsg(id, VITRIN);
-  } else {
-    await igMsg(id, clean);
-  }
-
-  // BAYRAM GECIKME UYARISI - 20-29 Mayis 2026 arasi siparis onaylaninca gonder
   if (siparis && siparis.ad_soyad) {
-    var bugunBayram = new Date();
+    await tgGonder(siparis);
     var bayramBaslangic = new Date('2026-05-20T00:00:00');
     var bayramBitis = new Date('2026-05-29T23:59:59');
-    if (bugunBayram >= bayramBaslangic && bugunBayram <= bayramBitis) {
+    if (bugun >= bayramBaslangic && bugun <= bayramBitis) {
       await wait(500);
       await igMsg(id, 'Efendim biliyorsunuz malum Kurban Bayrami yaklasıyor, bu durumlarda siparisıniz gecikebilir. Bunun nedeni kargo firmalarının tatil olmasından dolayı bu tarz gecikmeler yasanabilir ve elinize gec ulasabilir. Bu durum sizler icin bir sorun teskil ediyor mu?');
     }
@@ -310,10 +320,14 @@ async function process(id) {
   if (u.queue.length > 0) await process(id);
 }
 
+// --- WEBHOOK ENDPOINT'LERİ ---
+
 app.get('/webhook', function(req, res) {
   if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === VERIFY_TOKEN) {
     res.status(200).send(req.query['hub.challenge']);
-  } else { res.status(403).send('Error'); }
+  } else {
+    res.status(403).send('Error');
+  }
 });
 
 app.post('/webhook', async function(req, res) {
@@ -328,6 +342,16 @@ app.post('/webhook', async function(req, res) {
         var txt = ev.message && ev.message.text;
         if (!sid || !txt) continue;
         if (ev.message && ev.message.is_echo) continue;
+
+        // Aynı mesaj ID'si tekrar gelirse işleme (Instagram çift gönderebilir)
+        var msgId = ev.message && ev.message.mid;
+        if (msgId) {
+          if (islenenMesajlar.has(msgId)) continue;
+          islenenMesajlar.add(msgId);
+          (function(mid) {
+            setTimeout(function() { islenenMesajlar.delete(mid); }, 600000);
+          })(msgId);
+        }
 
         var u = getK(sid);
         var last = u.queue.length > 0 ? u.queue[u.queue.length - 1].trim().toLowerCase() : '';
