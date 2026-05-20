@@ -1,6 +1,6 @@
 const express = require('express');
 const axios = require('axios');
-const Database = require('better-sqlite3');
+const { createClient } = require('@libsql/client');
 const app = express();
 
 app.use(express.json());
@@ -11,27 +11,35 @@ const CLAUDE_API_KEY  = process.env.CLAUDE_API_KEY;
 const IG_ACCESS_TOKEN = process.env.IG_ACCESS_TOKEN;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID   = process.env.TELEGRAM_CHAT_ID;
+const TURSO_URL          = process.env.TURSO_URL;
+const TURSO_TOKEN        = process.env.TURSO_TOKEN;
 
-// ─── SQLite KURULUM ────────────────────────────────────────────────────────────
-// npm install better-sqlite3
-const db = new Database('musteriler.db');
+// ─── TURSO KURULUM ─────────────────────────────────────────────────────────────
+// npm install @libsql/client
+const db = createClient({ url: TURSO_URL, authToken: TURSO_TOKEN });
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS kullanicilar (
-    id TEXT PRIMARY KEY,
-    gorsel_gitti INTEGER DEFAULT 0,
-    kart_uyari_gitti INTEGER DEFAULT 0,
-    konusmalar TEXT DEFAULT '[]',
-    guncelleme INTEGER DEFAULT (strftime('%s','now'))
-  )
-`);
+async function dbInit() {
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS kullanicilar (
+      id TEXT PRIMARY KEY,
+      gorsel_gitti INTEGER DEFAULT 0,
+      kart_uyari_gitti INTEGER DEFAULT 0,
+      konusmalar TEXT DEFAULT '[]',
+      guncelleme INTEGER DEFAULT (unixepoch())
+    )
+  `);
+}
+dbInit().catch(e => console.error('DB init err:', e.message));
 
-function dbKullaniciAl(id) {
-  let row = db.prepare('SELECT * FROM kullanicilar WHERE id = ?').get(id);
-  if (!row) {
-    db.prepare('INSERT INTO kullanicilar (id) VALUES (?)').run(id);
-    row = db.prepare('SELECT * FROM kullanicilar WHERE id = ?').get(id);
+async function dbKullaniciAl(id) {
+  const r = await db.execute({ sql: 'SELECT * FROM kullanicilar WHERE id = ?', args: [id] });
+  if (r.rows.length === 0) {
+    await db.execute({ sql: 'INSERT INTO kullanicilar (id) VALUES (?)', args: [id] });
+    const r2 = await db.execute({ sql: 'SELECT * FROM kullanicilar WHERE id = ?', args: [id] });
+    const row = r2.rows[0];
+    return { gorselGitti: false, kartUyariGitti: false, konusmalar: [] };
   }
+  const row = r.rows[0];
   return {
     gorselGitti:    !!row.gorsel_gitti,
     kartUyariGitti: !!row.kart_uyari_gitti,
@@ -39,23 +47,24 @@ function dbKullaniciAl(id) {
   };
 }
 
-function dbKaydet(id, data) {
-  db.prepare(`
-    UPDATE kullanicilar
-    SET gorsel_gitti = ?, kart_uyari_gitti = ?, konusmalar = ?, guncelleme = strftime('%s','now')
-    WHERE id = ?
-  `).run(
-    data.gorselGitti ? 1 : 0,
-    data.kartUyariGitti ? 1 : 0,
-    JSON.stringify(data.konusmalar),
-    id
-  );
+async function dbKaydet(id, data) {
+  await db.execute({
+    sql: `UPDATE kullanicilar
+          SET gorsel_gitti = ?, kart_uyari_gitti = ?, konusmalar = ?, guncelleme = unixepoch()
+          WHERE id = ?`,
+    args: [
+      data.gorselGitti ? 1 : 0,
+      data.kartUyariGitti ? 1 : 0,
+      JSON.stringify(data.konusmalar),
+      id,
+    ],
+  });
 }
 
-// 30 günden eski kayıtları temizle (günde 1 kez yeterli)
-function eskiKayitlariTemizle() {
+// 30 günden eski kayıtları temizle
+async function eskiKayitlariTemizle() {
   const sinir = Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
-  db.prepare('DELETE FROM kullanicilar WHERE guncelleme < ?').run(sinir);
+  await db.execute({ sql: 'DELETE FROM kullanicilar WHERE guncelleme < ?', args: [sinir] });
 }
 setInterval(eskiKayitlariTemizle, 24 * 60 * 60 * 1000);
 
@@ -223,7 +232,7 @@ async function isle(id) {
   }
 
   // DB'den kullanıcı verisi
-  const veri = dbKullaniciAl(id);
+  const veri = await dbKullaniciAl(id);
   const ilkMi = veri.konusmalar.length === 0;
 
   // ── Vitrin: sadece ilk mesajda, sadece 1 kez ──
