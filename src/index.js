@@ -240,4 +240,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Bot sunucusu ${PORT} portunda çalışıyor`);
 });
-Content is user-generated and unverified.
