@@ -1,3 +1,7 @@
+process.on('uncaughtException', function(err) {
+  console.error('HATA:', err.message, err.stack);
+  process.exit(1);
+});
 const express = require('express');
 const axios = require('axios');
 const app = express();
