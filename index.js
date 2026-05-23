@@ -14,8 +14,7 @@ const TELEGRAM_CHAT_ID   = process.env.TELEGRAM_CHAT_ID;
 const TURSO_URL          = process.env.TURSO_URL;
 const TURSO_TOKEN        = process.env.TURSO_TOKEN;
 
-// ─── TURSO KURULUM ─────────────────────────────────────────────────────────────
-// npm install @libsql/client
+// ─── TURSO ─────────────────────────────────────────────────────────────────────
 const db = createClient({ url: TURSO_URL, authToken: TURSO_TOKEN });
 
 async function dbInit() {
@@ -44,7 +43,6 @@ async function dbKullaniciAl(id) {
   }
   const row = r.rows[0];
   const sonMesaj = Number(row.son_mesaj) || 0;
-  // 1 gunden fazla sessizlik → sifirla
   if ((simdi - sonMesaj) > BIR_GUN_SANIYE && row.gorsel_gitti) {
     return { gorselGitti: false, kartUyariGitti: false, konusmalar: [] };
   }
@@ -72,16 +70,14 @@ async function dbKaydet(id, data) {
   });
 }
 
-// 30 günden eski kayıtları temizle
 async function eskiKayitlariTemizle() {
   const sinir = Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
   await db.execute({ sql: 'DELETE FROM kullanicilar WHERE guncelleme < ?', args: [sinir] });
 }
 setInterval(eskiKayitlariTemizle, 24 * 60 * 60 * 1000);
 
-// ─── RAM: Sadece geçici işlem state'i ─────────────────────────────────────────
-const islemDurumu = {}; // { [id]: { mesgulMu, bekleyenler, timer } }
-
+// ─── RAM STATE ─────────────────────────────────────────────────────────────────
+const islemDurumu = {};
 function islemDurumuAl(id) {
   if (!islemDurumu[id]) {
     islemDurumu[id] = { mesgulMu: false, bekleyenler: [], timer: null };
@@ -99,11 +95,11 @@ const FORMA_GORSELLERI = {
 };
 
 const URUN_KODLARI = {
-  '0021': 'FB RETRO CUBUKLU FORMASI',
+  '0021': 'FB RETRO ÇUBUKLU FORMASI',
   '0022': 'FB RETRO SARI FORMASI',
-  '0023': 'FB GRI TASARIM FORMASI',
+  '0023': 'FB GRİ TASARIM FORMASI',
   '0024': 'FB PALAMUT SARI FORMASI',
-  '0025': 'FB PALAMUT LACIVERT FORMASI',
+  '0025': 'FB PALAMUT LACİVERT FORMASI',
 };
 
 const TUM_GORSELLER = Object.values(FORMA_GORSELLERI);
@@ -112,7 +108,7 @@ const KART_UYARI = 'Kartla ödemelerde kargo firmaları Pos Cihazı Hizmet Bedel
 
 const VITRIN_METNI = 'Kargo Dahil 1 Adet 630₺\n2 Adet Forma 1.250₺\n\n2 Al 1 Hediye Kampanyasında 1.250₺\n2 Forma Alın 1.250₺ Ödeyin, 1 Forma Bizden Hediye!\nToplam 3 Forma Kapınıza Gelir!\n\nKapıda Ödeme Şeffaf Kargo İle Gönderim Sağlıyoruz 🙏🏻\nÜrünü Görüp Öyle Teslim Alıyorsunuz 👍';
 
-// ─── YARDIMCI FONKSİYONLAR ─────────────────────────────────────────────────────
+// ─── YARDIMCI ──────────────────────────────────────────────────────────────────
 function kodaIsimCevir(metin) {
   let s = metin;
   Object.keys(URUN_KODLARI).forEach(k => {
@@ -122,9 +118,7 @@ function kodaIsimCevir(metin) {
 }
 
 function kartVar(m) {
-  return ['kart', 'kard', 'kartla', 'karta', 'kredi'].some(k =>
-    m.toLowerCase().includes(k)
-  );
+  return ['kart', 'kard', 'kartla', 'karta', 'kredi'].some(k => m.toLowerCase().includes(k));
 }
 
 function siparisiParsEt(metin) {
@@ -135,7 +129,6 @@ function siparisiParsEt(metin) {
   return null;
 }
 
-// Boş/anlamsız mesaj kontrolü — Claude'a gönderme, maliyet düşür
 function anlamsizMi(txt) {
   const t = txt.trim();
   if (!t) return true;
@@ -144,11 +137,9 @@ function anlamsizMi(txt) {
   return false;
 }
 
-function bekle(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}
+function bekle(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// ─── API ÇAĞRILARI ─────────────────────────────────────────────────────────────
+// ─── API ───────────────────────────────────────────────────────────────────────
 async function telegramGonder(siparis) {
   try {
     if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
@@ -161,12 +152,9 @@ async function telegramGonder(siparis) {
       'ÜRÜN: ' + urun + '\n' +
       'TOPLAM: ' + siparis.toplam + ' TL';
     await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      chat_id: TELEGRAM_CHAT_ID,
-      text: msg,
+      chat_id: TELEGRAM_CHAT_ID, text: msg,
     });
-  } catch (e) {
-    console.error('Telegram err:', e.message);
-  }
+  } catch (e) { console.error('Telegram err:', e.message); }
 }
 
 async function igMesaj(id, metin) {
@@ -193,19 +181,8 @@ async function claude(mesajlar) {
   try {
     const r = await axios.post(
       'https://api.anthropic.com/v1/messages',
-      {
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 400, // 600'den düşürdük — kısa cevap yeter
-        system: PROMPT,
-        messages: mesajlar,
-      },
-      {
-        headers: {
-          'x-api-key': CLAUDE_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'Content-Type': 'application/json',
-        },
-      }
+      { model: 'claude-haiku-4-5-20251001', max_tokens: 400, system: PROMPT, messages: mesajlar },
+      { headers: { 'x-api-key': CLAUDE_API_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' } }
     );
     return r.data.content[0].text;
   } catch (e) {
@@ -214,21 +191,14 @@ async function claude(mesajlar) {
   }
 }
 
-// ─── ANA İŞLEM DÖNGÜSÜ ────────────────────────────────────────────────────────
+// ─── ANA DÖNGÜ ─────────────────────────────────────────────────────────────────
 async function isle(id) {
   const durum = islemDurumuAl(id);
-
-  // Race condition koruması: zaten işlemdeyse çıkıyoruz,
-  // isle() zaten biterken kuyruğu kontrol ediyor (aşağıda).
   if (durum.mesgulMu) return;
   if (durum.bekleyenler.length === 0) return;
-
   durum.mesgulMu = true;
 
-  // Tüm bekleyenleri al, kuyruğu temizle
   const mesajlar = durum.bekleyenler.splice(0);
-
-  // Tekrar ve boşlukları temizle
   const benzersiz = [];
   let onceki = '';
   for (const m of mesajlar) {
@@ -242,11 +212,9 @@ async function isle(id) {
     return;
   }
 
-  // DB'den kullanıcı verisi
   const veri = await dbKullaniciAl(id);
-  const ilkMi = veri.konusmalar.length === 0;
 
-  // ── Vitrin: sadece ilk mesajda, sadece 1 kez ──
+  // ── Vitrin: sadece 1 kez (1 gün sıfırlanır) ──
   if (!veri.gorselGitti) {
     veri.gorselGitti = true;
     await igMesaj(id, VITRIN_METNI);
@@ -254,8 +222,7 @@ async function isle(id) {
       await igGorsel(id, url);
       await bekle(600);
     }
-    // Sadece selamlama ise burada dur
-    const selamlamaMi = /^(merhaba|selam|iyi g.nl.r|g.nayd.n|iyi ak.amlar|hey|sa|slm|mrb)[\s!.]*$/i.test(birlesik.trim());
+    const selamlamaMi = /^(merhaba|selam|iyi günler|günaydın|iyi akşamlar|hey|sa|slm|mrb)[\s!.]*$/i.test(birlesik.trim());
     veri.konusmalar.push({ role: 'user', content: birlesik });
     veri.konusmalar.push({ role: 'assistant', content: VITRIN_METNI });
     await dbKaydet(id, veri);
@@ -264,7 +231,6 @@ async function isle(id) {
       if (durum.bekleyenler.length > 0) await isle(id);
       return;
     }
-    // Soru varsa Claude da cevap versin — devam et
   }
 
   // ── Kart uyarısı: sadece 1 kez ──
@@ -272,21 +238,15 @@ async function isle(id) {
     veri.kartUyariGitti = true;
     veri.konusmalar.push({ role: 'user', content: birlesik });
     veri.konusmalar.push({ role: 'assistant', content: KART_UYARI });
-    dbKaydet(id, veri);
-
+    await dbKaydet(id, veri);
     await igMesaj(id, KART_UYARI);
     durum.mesgulMu = false;
     if (durum.bekleyenler.length > 0) await isle(id);
     return;
   }
 
-  // ── Claude'a gönder ──
   veri.konusmalar.push({ role: 'user', content: birlesik });
-
-  // Maliyet optimizasyonu: son 10 mesaj (20 yerine)
-  if (veri.konusmalar.length > 10) {
-    veri.konusmalar = veri.konusmalar.slice(-10);
-  }
+  if (veri.konusmalar.length > 10) veri.konusmalar = veri.konusmalar.slice(-10);
 
   const yanit = await claude(veri.konusmalar);
 
@@ -296,13 +256,11 @@ async function isle(id) {
     .trim();
 
   veri.konusmalar.push({ role: 'assistant', content: temiz });
-  dbKaydet(id, veri);
+  await dbKaydet(id, veri);
 
-  // Sipariş varsa Telegram'a gönder
   const siparis = siparisiParsEt(yanit);
   if (siparis && siparis.ad_soyad) await telegramGonder(siparis);
 
-  // Yanıtı gönder
   if (yanit.includes('###VITRIN_GOSTER###')) {
     await igMesaj(id, VITRIN_METNI);
   } else if (temiz) {
@@ -310,12 +268,10 @@ async function isle(id) {
   }
 
   durum.mesgulMu = false;
-
-  // Kuyrukta bekleyen varsa devam et
   if (durum.bekleyenler.length > 0) await isle(id);
 }
 
-// ─── PROMPT (YENİDEN YAZILDI) ─────────────────────────────────────────────────
+// ─── PROMPT ────────────────────────────────────────────────────────────────────
 const PROMPT = `Sen bir forma mağazasının satış temsilcisisin. Instagram DM. DAIMA Türkçe yanıt ver.
 
 === KİMLİK VE KESİN KURALLAR ===
@@ -328,13 +284,8 @@ const PROMPT = `Sen bir forma mağazasının satış temsilcisisin. Instagram DM
 - Daima "siz/sizin/size" kullan. "Sen/sana" YASAK.
 - "efendim" kelimesini yanıt başında EN FAZLA 1 kez kullan. Cümle sonunda kullanma.
 - KISA yanıt: maksimum 2-3 cümle. Madde işareti yok. Kalın yazı yok.
-- Üslup: sade, doğal, işine odaklı. Ne aşırı samimi ne soğuk. Tıpkı güvenilir bir esnaf gibi.
-- YASAK ifadeler ve davranışlar:
-  "Harika seçim", "Mükemmel seçim", "Güzel seçim", "Harika seçimler",
-  "Sevinçle", "Mutluluk duyarım", "Mutluluk duyarız", "Memnuniyetle",
-  "Sizi memnun etmek", "Sizin memnuniyetiniz", "Her zaman yanınızdayız",
-  "Hizmetinizdeyiz", "Emrinizdeyiz", "Rica ederiz", "Ne kadar güzel",
-  "Çok iyi seçtiniz", "Kesinlikle beğeneceksiniz".
+- Üslup: sade, doğal, işine odaklı. Ne aşırı samimi ne soğuk.
+- YASAK ifadeler: "Harika seçim", "Mükemmel seçim", "Güzel seçim", "Harika seçimler", "Sevinçle", "Mutluluk duyarım", "Mutluluk duyarız", "Memnuniyetle", "Sizi memnun etmek", "Her zaman yanınızdayız", "Hizmetinizdeyiz", "Emrinizdeyiz", "Ne kadar güzel", "Çok iyi seçtiniz", "Kesinlikle beğeneceksiniz".
 - Ürün seçimini asla yorumlama. Görsel proaktif önerme. Siparişe zorlama.
 - Konuşma ortasında "Hoş geldiniz" deme. Sorulan soruyu tekrar etme.
 
@@ -345,13 +296,13 @@ const PROMPT = `Sen bir forma mağazasının satış temsilcisisin. Instagram DM
 - Müşteri daha önce yazmışsa selamlama yapma.
 
 === NOKTA / PARÇALI MESAJ ===
-Müşteri "." ".." "..." veya emoji gönderirse:
+Müşteri "." ".." "..." veya sadece emoji gönderirse:
 "Sohbetin başında görselleri iletmiştik efendim, oradan beğendiğiniz formayı seçip kodunu iletebilirsiniz."
 
 === GÖRSEL İSTEĞİ ===
-Müşteri "görsel yok", "gelmedi", "nereden seçeceğim" gibi bir şey yazarsa:
+Müşteri "görsel yok", "gelmedi", "nereden seçeceğim" gibi yazarsa:
 "Sohbetin başında tüm modellerimizi iletmiştik efendim, yukarı kaydırarak inceleyebilirsiniz."
-Asla "görselleri iletiyorum" veya "gönderiyorum" deme — görselleri tekrar gönderemezsin.
+ASLA "görselleri iletiyorum" veya "gönderiyorum" deme.
 
 === HATIRLATMA İSTEĞİ ===
 "Bize yazar mısınız / hatırlatır mısınız" derse:
@@ -375,15 +326,16 @@ Belirli model sorulursa: "Efendim güncel modellerimiz bu şekildedir, bunların
 
 === FİYATLAR ===
 - 1 adet: 630 TL
-- 2 adet: 1.250 TL (kampanya otomatik devreye girer, aşağıya bak)
+- 2 adet: 1.250 TL → KAMPANYA OTOMATİK DEVREYE GİRER (aşağı bak)
 - 3 adet: 1.250 TL (kampanya: 2 al 1 hediye)
 - 4 adet: 1.750 TL
+ASLA kendi başına fiyat hesaplama. Sadece bu fiyatları kullan.
 
-KAMPANYA KURALI (ÇOK ÖNEMLİ):
-Müşteri 2 forma seçerse: "Efendim kampanyamız var, 1 forma da bizden size hediye. Gönderdiğimiz görseller üzerinden istediğiniz 1 formanın kodunu iletirseniz kampanyamızdan yararlanmış olursunuz."
-Müşteri 3 forma seçerse: Kampanya otomatik uygulanır, fiyat 1.250 TL'dir. Ayrıca sormadan uygula.
-Müşteri 4 forma seçerse: 1.750 TL.
-ASLA kendi başına fiyat hesaplama. Yukarıdaki fiyatların dışına çıkma.
+KAMPANYA KURALLARI (ÇOK ÖNEMLİ):
+- Müşteri 1 forma istiyorsa: normal sipariş, 630 TL.
+- Müşteri 2 forma seçerse: "Efendim kampanyamız var, 1 forma da bizden size hediye. Görseller üzerinden istediğiniz 3. formanın kodunu da iletirseniz kampanyamızdan yararlanmış olursunuz." de ve 3 formanın kodunu bekle.
+- Müşteri 3 forma seçerse veya kampanyadan yararlanmak istiyorsa: 3 formanın tamamının kodunu veya adını iste. Toplam 1.250 TL uygula.
+- Müşteri kampanya sorarsa: ###VITRIN_GOSTER### yaz, sonra kısa açıklama yap.
 
 FİYAT SORUSU GELİNCE:
 Müşteri fiyat, kampanya, kaç para gibi sorular sorarsa önce ###VITRIN_GOSTER### yaz, sonra kısa açıklama yap.
@@ -397,7 +349,7 @@ Sipariş öncesi şehir sor. Şehir verildikten sonra: "2-3 iş günü içerisin
 Sipariş sonrası direkt: "2-3 iş günü içerisinde sizde olur efendim."
 
 === İADE ===
-Bu bilgiyi proaktif olarak söyleme. Sadece müşteri "yanlış gelirse", "dar olursa", "beden tutmazsa" gibi endişe belirtirse söyle:
+Bu bilgiyi proaktif olarak söyleme. Sadece müşteri "yanlış gelirse", "dar olursa", "beden tutmazsa" gibi endişe belirtirse:
 "Ürün sizlere ulaştıktan sonra 2 gün içerisinde bizlere ulaşırsanız sorununuzu çözüme kavuşturabiliriz efendim."
 
 === KOD KURALI ===
@@ -424,8 +376,8 @@ Müşteri ürün adını söylerse kodu ayrıca sorma. Müşteri kod yazarsa dir
 
 === SİPARİŞ AKIŞI (sırayla takip et) ===
 ADIM 1: Görseller otomatik gönderilir.
-ADIM 2: Müşteri ürün kodu veya ürün adı iletir. Her ikisi de geçerlidir, kodu ayrıca sorma.
-ADIM 3: Ürünü BÜYÜK HARFLE tam adına çevir. Beden bilgisi yoksa sadece kilo sor. Beden zaten belli ise bir daha sorma.
+ADIM 2: Müşteri ürün kodu veya ürün adı iletir. Her ikisi geçerli, kodu ayrıca sorma.
+ADIM 3: Ürünü BÜYÜK HARFLE tam adına çevir. Beden bilgisi yoksa sadece kilo sor. Beden belli ise sorma.
 ADIM 4: Beden belli olunca şu formu gönder:
 "Siparişinizi Oluşturmak İçin
 
@@ -462,12 +414,9 @@ Ardından şu JSON bloğunu çıkar (müşteriye gösterme):
 {"ad_soyad":"","telefon":"","adres":"","urun":"","toplam":""}
 ###SIPARIS_BITIS###`;
 
-// ─── WEBHOOK ──────────────────────────────────────────────────────────────────
+// ─── WEBHOOK ───────────────────────────────────────────────────────────────────
 app.get('/webhook', (req, res) => {
-  if (
-    req.query['hub.mode'] === 'subscribe' &&
-    req.query['hub.verify_token'] === VERIFY_TOKEN
-  ) {
+  if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === VERIFY_TOKEN) {
     res.status(200).send(req.query['hub.challenge']);
   } else {
     res.status(403).send('Error');
@@ -475,30 +424,21 @@ app.get('/webhook', (req, res) => {
 });
 
 app.post('/webhook', async (req, res) => {
-  res.status(200).send('OK'); // IG 200 bekliyor, hemen yanıtla
-
+  res.status(200).send('OK');
   try {
     const body = req.body;
     if (body.object !== 'instagram') return;
-
     for (const entry of body.entry) {
       for (const event of (entry.messaging || [])) {
         const sid = event.sender?.id;
         const txt = event.message?.text;
-
         if (!sid || !txt) continue;
         if (event.message?.is_echo) continue;
-
         const durum = islemDurumuAl(sid);
-
-        // Aynı mesaj tekrar geldiyse atla (IG bazen tekrar gönderiyor)
         const temizTxt = txt.trim().toLowerCase();
         const sonBekleyen = durum.bekleyenler[durum.bekleyenler.length - 1];
         if (sonBekleyen && sonBekleyen.trim().toLowerCase() === temizTxt) continue;
-
         durum.bekleyenler.push(txt);
-
-        // Debounce: 3 saniye içinde gelen mesajları birleştir
         if (durum.timer) clearTimeout(durum.timer);
         durum.timer = setTimeout(async () => {
           durum.timer = null;
@@ -506,9 +446,7 @@ app.post('/webhook', async (req, res) => {
         }, 3000);
       }
     }
-  } catch (e) {
-    console.error('Webhook err:', e.message);
-  }
+  } catch (e) { console.error('Webhook err:', e.message); }
 });
 
 const PORT = process.env.PORT || 3000;
