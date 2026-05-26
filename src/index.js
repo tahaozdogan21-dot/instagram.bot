@@ -237,17 +237,15 @@ async function telegramGonder(siparis) {
 
     const arastirma = await riskArastir(siparis);
 
-    const riskSatir = ((arastirma.match(/RISK:\s*(.+)/i) || [])[1] || 'ORTA').trim();
-    const telBulgu = ((arastirma.match(/TEL:\s*(.+)/i) || [])[1] || 'Kayit bulunamadi').trim();
-    const isimBulgu = ((arastirma.match(/ISIM:\s*(.+)/i) || [])[1] || 'Kayit bulunamadi').trim();
-    const adresBulgu = ((arastirma.match(/ADRES:\s*(.+)/i) || [])[1] || 'Kayit bulunamadi').trim();
-    const gerekce = ((arastirma.match(/GEREKCE:\s*(.+)/i) || [])[1] || '-').trim();
+    // Haiku sonucunu temizle (markdown kaldir)
+    const temizMetin = arastirma.replace(/\*+/g, '').replace(/#+/g, '').trim();
 
+    // Risk skoru bul
     let riskEmoji = '🟡';
     let riskTR = 'ORTA';
-    const ru = riskSatir.toUpperCase();
-    if (ru.includes('YUKSEK') || ru.includes('YÜKSEK')) { riskEmoji = '🔴'; riskTR = 'YÜKSEK'; }
-    else if (ru.includes('NORMAL')) { riskEmoji = '🟢'; riskTR = 'NORMAL'; }
+    const ru = temizMetin.toUpperCase();
+    if (ru.includes('YUKSEK') || ru.includes('YÜKSEK') || ru.includes('RISK: YUKSEK') || ru.includes('YÜKSEK RİSK')) { riskEmoji = '🔴'; riskTR = 'YÜKSEK'; }
+    else if (ru.includes('NORMAL') || ru.includes('RISK: NORMAL')) { riskEmoji = '🟢'; riskTR = 'NORMAL'; }
 
     const avukatSorgula = sehir.slug ? 'https://avukatsorgula.com/' + sehir.slug + '-avukat-sorgulama' : 'https://avukatsorgula.com';
     const baroLink = 'https://www.barobirlik.org.tr/AvukatArama/?q=' + encodeURIComponent(siparis.ad_soyad);
@@ -255,6 +253,8 @@ async function telegramGonder(siparis) {
     const googleIsim = 'https://www.google.com/search?q=' + encodeURIComponent('"' + siparis.ad_soyad + '" ' + sehir.isim + ' avukat hukuk');
     const googleAdres = 'https://www.google.com/search?q=' + encodeURIComponent('"' + (bina || siparis.adres) + '" avukat hukuk');
     const numaraAra = 'https://www.numaraara.com/numara/' + telefon;
+
+    const googleIsimSadece = 'https://www.google.com/search?q=' + encodeURIComponent('"' + siparis.ad_soyad + '"');
 
     const msg =
       '📦 YENİ SİPARİŞ!\n\n' +
@@ -264,24 +264,25 @@ async function telegramGonder(siparis) {
       'ÜRÜN: ' + urun + '\n' +
       'TOPLAM: ' + siparis.toplam + ' TL\n\n' +
       '━━━━━━━━━━━━━━━━━━━━━\n' +
-      riskEmoji + ' ANALİZ: ' + riskTR + '\n' +
+      riskEmoji + ' RİSK: ' + riskTR + '\n' +
       '━━━━━━━━━━━━━━━━━━━━━\n' +
-      '📱 ' + telBulgu + '\n' +
-      '👤 ' + isimBulgu + '\n' +
-      '🏢 ' + adresBulgu + '\n' +
-      '💬 ' + gerekce + '\n\n' +
+      temizMetin + '\n\n' +
+      '━━━━━━━━━━━━━━━━━━━━━\n' +
+      '🔗 SORGULA\n' +
+      '━━━━━━━━━━━━━━━━━━━━━\n' +
+      '📱 ' + googleTel + '\n' +
       '──────────────────\n' +
-      '🔎 TELEFON\n' +
-      googleTel + '\n' +
-      numaraAra + '\n\n' +
+      '📱 ' + numaraAra + '\n' +
       '──────────────────\n' +
-      '🔎 KİŞİ\n' +
-      googleIsim + '\n' +
-      baroLink + '\n' +
-      avukatSorgula + '\n\n' +
+      '👤 ' + googleIsimSadece + '\n' +
       '──────────────────\n' +
-      '🔎 ADRES\n' +
-      googleAdres;
+      '👤 ' + googleIsim + '\n' +
+      '──────────────────\n' +
+      '⚖️ ' + baroLink + '\n' +
+      '──────────────────\n' +
+      '⚖️ ' + avukatSorgula + '\n' +
+      '──────────────────\n' +
+      '🏢 ' + googleAdres;
 
     await axios.post('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
       chat_id: TELEGRAM_CHAT_ID,
