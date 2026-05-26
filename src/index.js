@@ -193,7 +193,7 @@ async function riskArastir(siparis) {
       adresQuery = '"' + siparis.adres + '" avukat hukuk';
     }
 
-    const prompt = 'Sen bir e-ticaret guvenlik analistisin. Asagidaki siparis sahibinin avukat veya avukatlikla ilgili bir meslekte (arabulucu, hukuk danismani, marka vekili, patent vekili, noter) calisip calismadigini arastir.\n\nSIPARIS:\nAd: ' + siparis.ad_soyad + '\nTel: ' + telefon + '\nAdres: ' + siparis.adres + '\n\nYAP:\n1. "' + telefon + '" avukat hukuk burosu ara\n2. "' + siparis.ad_soyad + '" ' + sehir.isim + ' avukat arabulucu hukuk ara\n3. ' + adresQuery + ' ara\n\nKESINLIKLE SADECE BU FORMATI YAZ:\nRISK: YUKSEK\nTEL: [bulgu]\nISIM: [bulgu]\nADRES: [bulgu]\nGEREKCE: [1 cumle]';
+    const prompt = 'Asagidaki isletme adresini ve telefon numarasini arastir. Bu bilgilerin hukuk burosu, avukatlik burosu veya arabuluculuk ofisi ile iliskili olup olmadigini kontrol et.\n\nARASTIR:\n1. Telefon: "' + telefon + '" - Bu numara bir hukuk burosu veya avukata mi ait?\n2. Adres: ' + adresQuery + ' - Bu adres hukuk burosu mu?\n3. Isim: "' + siparis.ad_soyad + '" ' + sehir.isim + ' hukuk - Bu kisi bir hukuk profesyoneli mi?\n\nSADECE BU FORMATI YAZ:\nRISK: YUKSEK\nTEL: [sonuc]\nISIM: [sonuc]\nADRES: [sonuc]\nGEREKCE: [1 cumle]';
 
     const r = await axios.post(
       'https://api.anthropic.com/v1/messages',
@@ -252,6 +252,8 @@ async function telegramGonder(siparis) {
     const avukatSorgula = sehir.slug ? 'https://avukatsorgula.com/' + sehir.slug + '-avukat-sorgulama' : 'https://avukatsorgula.com';
     const baroLink = 'https://www.barobirlik.org.tr/AvukatArama/?q=' + encodeURIComponent(siparis.ad_soyad);
     const googleTel = 'https://www.google.com/search?q=' + encodeURIComponent('"' + telefon + '"');
+    const googleIsim = 'https://www.google.com/search?q=' + encodeURIComponent('"' + siparis.ad_soyad + '" ' + sehir.isim + ' avukat hukuk');
+    const googleAdres = 'https://www.google.com/search?q=' + encodeURIComponent('"' + (bina || siparis.adres) + '" avukat hukuk');
     const numaraAra = 'https://www.numaraara.com/numara/' + telefon;
 
     const msg =
@@ -268,10 +270,18 @@ async function telegramGonder(siparis) {
       '👤 ' + isimBulgu + '\n' +
       '🏢 ' + adresBulgu + '\n' +
       '💬 ' + gerekce + '\n\n' +
-      '🔍 ' + googleTel + '\n' +
-      '📲 ' + numaraAra + '\n' +
-      '⚖️ ' + baroLink + '\n' +
-      '🔎 ' + avukatSorgula;
+      '──────────────────\n' +
+      '🔎 TELEFON\n' +
+      googleTel + '\n' +
+      numaraAra + '\n\n' +
+      '──────────────────\n' +
+      '🔎 KİŞİ\n' +
+      googleIsim + '\n' +
+      baroLink + '\n' +
+      avukatSorgula + '\n\n' +
+      '──────────────────\n' +
+      '🔎 ADRES\n' +
+      googleAdres;
 
     await axios.post('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
       chat_id: TELEGRAM_CHAT_ID,
