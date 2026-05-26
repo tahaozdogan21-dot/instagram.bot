@@ -231,7 +231,7 @@ async function riskArastir(siparis) {
     // 2. İsim sorgusu
     haikusorgu(
       sistemPrompt,
-      '"' + siparis.ad_soyad + '" ' + sehir.isim + ' avukat - Tam olarak bu isimde biri avukat, arabulucu, marka vekili veya hukuk danışmanı mı? Sadece TAM AYNI isim için sonuç ver. Benzer isimler sayma. Baro sicil numarası var mı? Tam eşleşme varsa yaz, yoksa "Kayıt bulunamadı" yaz.'
+      siparis.ad_soyad + ' avukat - Bu isimde kişiyi ara. Hem "' + siparis.ad_soyad + '" hem de ' + siparis.ad_soyad + ' avukat olarak ara. LinkedIn, avukatz.com, barobirlik.org.tr sitelerinde bul. Attorney at Law, marka vekili, brand protection, trademark specialist olabilir. Baro sicil numarası, TBB numarası, çalıştığı şirket var mı? Bulduklarını detaylı yaz, bulamazsan "Kayıt bulunamadı" yaz.'
     ),
 
     // 3. Adres sorgusu
@@ -244,7 +244,20 @@ async function riskArastir(siparis) {
 
   // Risk skoru hesapla
   const tumMetin = (telSonuc + isimSonuc + adresSonuc).toUpperCase();
-  const riskliKelimeler = ['AVUKAT', 'BARO', 'HUKUK', 'ARABULUCU', 'SİCİL', 'SICIL', 'PATENT VEKİL', 'MARKA VEKİL', 'AVUKATLIK'];
+  const riskliKelimeler = [
+    // Türkçe avukatlık
+    'AVUKAT', 'AVUKATLIK', 'BARO', 'SİCİL', 'SICIL', 'HUKUK BÜROSU', 'HUKUK DANIŞMAN',
+    'ARABULUCU', 'UZLAŞTIRMACI', 'STAJYER AVUKAT', 'İCRA AVUKAT',
+    // Türkçe marka/fikri mülkiyet
+    'MARKA VEKİL', 'PATENT VEKİL', 'FİKRİ MÜLKİYET', 'SINAİ MÜLKİYET',
+    'MARKA DANIŞMAN', 'MARKA KORUMA', 'MARKA TESCİL', 'MARKA İHLAL',
+    'PATENT DANIŞMAN', 'TASARIM TESCİL', 'HAKSIZ REKABET',
+    // İngilizce
+    'ATTORNEY', 'LAWYER', 'LAW FIRM', 'BARRISTER', 'SOLICITOR',
+    'TRADEMARK', 'BRAND PROTECTION', 'ANTI-COUNTERFEITING', 'COUNTERFEITING',
+    'INTELLECTUAL PROPERTY', 'PATENT AGENT', 'BRAND MONITOR',
+    'COMPLIANCE', 'LEGAL COUNSEL', 'IN-HOUSE COUNSEL'
+  ];
 
   // Olumsuz ifadeler varsa puan verme
   const olumsuz = ['BULUNAMADI', 'TESPIT EDILEMEDI', 'KAYIT YOK', 'MEVCUT DEGIL', 'NORMAL ADRES', 'TESPIT EDILEMEMIŞTIR', 'EDILEMEMIŞTIR'];
