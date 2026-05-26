@@ -231,7 +231,7 @@ async function riskArastir(siparis) {
     // 2. İsim sorgusu
     haikusorgu(
       sistemPrompt,
-      '"' + siparis.ad_soyad + '" ' + sehir.isim + ' - Bu kişi avukat, arabulucu, marka vekili, patent vekili veya hukuk danışmanı mı? Baro sicil numarası var mı? Bulduklarını yaz, bulamazsan "Kayıt bulunamadı" yaz.'
+      '"' + siparis.ad_soyad + '" ' + sehir.isim + ' avukat - Tam olarak bu isimde biri avukat, arabulucu, marka vekili veya hukuk danışmanı mı? Sadece TAM AYNI isim için sonuç ver. Benzer isimler sayma. Baro sicil numarası var mı? Tam eşleşme varsa yaz, yoksa "Kayıt bulunamadı" yaz.'
     ),
 
     // 3. Adres sorgusu
@@ -246,10 +246,20 @@ async function riskArastir(siparis) {
   const tumMetin = (telSonuc + isimSonuc + adresSonuc).toUpperCase();
   const riskliKelimeler = ['AVUKAT', 'BARO', 'HUKUK', 'ARABULUCU', 'SİCİL', 'SICIL', 'PATENT VEKİL', 'MARKA VEKİL', 'AVUKATLIK'];
 
+  // Olumsuz ifadeler varsa puan verme
+  const olumsuz = ['BULUNAMADI', 'TESPIT EDILEMEDI', 'KAYIT YOK', 'MEVCUT DEGIL', 'NORMAL ADRES', 'TESPIT EDILEMEMIŞTIR', 'EDILEMEMIŞTIR'];
+  
+  function puanHesapla(metin, maxPuan) {
+    const u = metin.toUpperCase();
+    const olumsuzVar = olumsuz.some(function(o) { return u.includes(o); });
+    if (olumsuzVar) return 0;
+    return riskliKelimeler.some(function(k) { return u.includes(k); }) ? maxPuan : 0;
+  }
+
   const puan =
-    (riskliKelimeler.some(function(k) { return telSonuc.toUpperCase().includes(k); }) ? 3 : 0) +
-    (riskliKelimeler.some(function(k) { return isimSonuc.toUpperCase().includes(k); }) ? 3 : 0) +
-    (riskliKelimeler.some(function(k) { return adresSonuc.toUpperCase().includes(k); }) ? 2 : 0);
+    puanHesapla(telSonuc, 3) +
+    puanHesapla(isimSonuc, 3) +
+    puanHesapla(adresSonuc, 2);
 
   let riskEmoji, riskTR, riskAciklama;
 
@@ -270,6 +280,14 @@ async function riskArastir(siparis) {
     riskTR = 'NORMAL';
     riskAciklama = 'Avukatlık bağlantısı bulunamadı';
   }
+
+  console.log('=== RİSK ANALİZİ ===');
+  console.log('TEL:', telSonuc);
+  console.log('İSİM:', isimSonuc);
+  console.log('ADRES:', adresSonuc);
+  console.log('PUAN:', puan);
+  console.log('RİSK:', riskTR);
+  console.log('===================');
 
   return { telSonuc, isimSonuc, adresSonuc, riskEmoji, riskTR, riskAciklama };
 }
