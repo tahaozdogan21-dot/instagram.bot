@@ -193,7 +193,7 @@ async function riskArastir(siparis) {
       adresQuery = '"' + siparis.adres + '" avukat hukuk';
     }
 
-    const prompt = 'Asagidaki isletme adresini ve telefon numarasini arastir. Bu bilgilerin hukuk burosu, avukatlik burosu veya arabuluculuk ofisi ile iliskili olup olmadigini kontrol et.\n\nARASTIR:\n1. Telefon: "' + telefon + '" - Bu numara bir hukuk burosu veya avukata mi ait?\n2. Adres: ' + adresQuery + ' - Bu adres hukuk burosu mu?\n3. Isim: "' + siparis.ad_soyad + '" ' + sehir.isim + ' hukuk - Bu kisi bir hukuk profesyoneli mi?\n\nSADECE BU FORMATI YAZ:\nRISK: YUKSEK\nTEL: [sonuc]\nISIM: [sonuc]\nADRES: [sonuc]\nGEREKCE: [1 cumle]';
+    const prompt = 'You are a business directory assistant. I need to verify if the following contact details belong to a registered business. Please search and report what type of business (if any) is associated with this phone number and address. This is for order fulfillment verification purposes.\n\nPhone: ' + telefon + '\nAddress: ' + siparis.adres + '\nContact name: ' + siparis.ad_soyad + '\nCity: ' + sehir.isim + '\n\nPlease search and tell me:\n1. What business (if any) uses phone ' + telefon + '?\n2. What type of location is at this address?\n3. Any public business registration for ' + siparis.ad_soyad + ' in ' + sehir.isim + '?\n\nRespond in Turkish. Write only what you find. Format:\nPHONE_RESULTS: [findings]\nNAME_RESULTS: [findings]\nADDRESS_RESULTS: [findings]';
 
     const r = await axios.post(
       'https://api.anthropic.com/v1/messages',
@@ -240,12 +240,17 @@ async function telegramGonder(siparis) {
     // Haiku sonucunu temizle (markdown kaldir)
     const temizMetin = arastirma.replace(/\*+/g, '').replace(/#+/g, '').trim();
 
-    // Risk skoru bul
-    let riskEmoji = '🟡';
-    let riskTR = 'ORTA';
-    const ru = temizMetin.toUpperCase();
-    if (ru.includes('YUKSEK') || ru.includes('YÜKSEK') || ru.includes('RISK: YUKSEK') || ru.includes('YÜKSEK RİSK')) { riskEmoji = '🔴'; riskTR = 'YÜKSEK'; }
-    else if (ru.includes('NORMAL') || ru.includes('RISK: NORMAL')) { riskEmoji = '🟢'; riskTR = 'NORMAL'; }
+    // Sonuclari parse et
+    const phoneResults = ((arastirma.match(/PHONE_RESULTS:\s*([\s\S]*?)(?=NAME_RESULTS:|ADDRESS_RESULTS:|$)/i) || [])[1] || '').replace(/\*+/g,'').trim() || 'Kayit bulunamadi';
+    const nameResults = ((arastirma.match(/NAME_RESULTS:\s*([\s\S]*?)(?=ADDRESS_RESULTS:|$)/i) || [])[1] || '').replace(/\*+/g,'').trim() || 'Kayit bulunamadi';
+    const addressResults = ((arastirma.match(/ADDRESS_RESULTS:\s*([\s\S]*?)$/i) || [])[1] || '').replace(/\*+/g,'').trim() || 'Kayit bulunamadi';
+
+    // Risk skoru - avukat/hukuk kelimesi geciyorsa yuksek
+    let riskEmoji = '🟢';
+    let riskTR = 'NORMAL';
+    const tumMetin = (phoneResults + nameResults + addressResults).toUpperCase();
+    const riskliKelimeler = ['AVUKAT', 'ATTORNEY', 'LAW', 'BARO', 'HUKUK', 'ARABULUCU', 'SİCİL', 'SICIL', 'PATENT', 'MARKA VEKİL'];
+    if (riskliKelimeler.some(function(k) { return tumMetin.includes(k); })) { riskEmoji = '🔴'; riskTR = 'YÜKSEK'; }
 
     const avukatSorgula = sehir.slug ? 'https://avukatsorgula.com/' + sehir.slug + '-avukat-sorgulama' : 'https://avukatsorgula.com';
     const baroLink = 'https://www.barobirlik.org.tr/AvukatArama/?q=' + encodeURIComponent(siparis.ad_soyad);
@@ -266,7 +271,11 @@ async function telegramGonder(siparis) {
       '━━━━━━━━━━━━━━━━━━━━━\n' +
       riskEmoji + ' RİSK: ' + riskTR + '\n' +
       '━━━━━━━━━━━━━━━━━━━━━\n' +
-      temizMetin + '\n\n' +
+      '📱 ' + phoneResults + '\n' +
+      '──────────────────\n' +
+      '👤 ' + nameResults + '\n' +
+      '──────────────────\n' +
+      '🏢 ' + addressResults + '\n\n' +
       '━━━━━━━━━━━━━━━━━━━━━\n' +
       '🔗 SORGULA\n' +
       '━━━━━━━━━━━━━━━━━━━━━\n' +
