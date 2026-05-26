@@ -149,14 +149,14 @@ function bekle(ms) {
 }
 
 // ─── API ÇAĞRILARI ─────────────────────────────────────────────────────────────
-// ─── YARDIMCI: Şehir tespiti ──────────────────────────────────────────────────
+
+// ─── ŞEHİR TESPİTİ ────────────────────────────────────────────────────────────
 const SEHIR_MAP = {
   'eskişehir': 'eskisehir', 'istanbul': 'istanbul', 'ankara': 'ankara',
   'izmir': 'izmir', 'şanlıurfa': 'sanliurfa', 'konya': 'konya',
   'bursa': 'bursa', 'antalya': 'antalya', 'adana': 'adana',
   'gaziantep': 'gaziantep', 'kayseri': 'kayseri', 'mersin': 'mersin',
   'diyarbakır': 'diyarbakir', 'samsun': 'samsun', 'trabzon': 'trabzon',
-  'malatya': 'malatya', 'erzurum': 'erzurum', 'van': 'van',
 };
 
 function sehirTespit(adres) {
@@ -168,7 +168,7 @@ function sehirTespit(adres) {
 }
 
 function adresParcala(adres) {
-  const binaRegex = /([A-ZÇĞİÖŞÜa-zçğışöşü\s]+(APT|APARTMANI|APARTMAN|PLAZA|İŞ MERKEZİ|IS MERKEZI|TOWER|REZİDANS|REZIDANS|BLOK)[A-ZÇĞİÖŞÜa-zçğışöşü\s\.]*)/i;
+  const binaRegex = /([A-ZÇĞİÖŞÜa-zçğışöşü\s]+(APT|APARTMANI|APARTMAN|PLAZA|İŞ MERKEZİ|IS MERKEZI|İŞHANI|ISHANI|TOWER|REZİDANS|REZIDANS|BLOK)[A-ZÇĞİÖŞÜa-zçğışöşü\s\.]*)/i;
   const binaMatch = adres.match(binaRegex);
   const bina = binaMatch ? binaMatch[0].trim() : '';
   const caddeRegex = /([A-ZÇĞİÖŞÜa-zçğışöşü\s]+(CAD|CADDE|BLV|BULVAR|BULVARI|SOK|SOKAK|SK)[A-ZÇĞİÖŞÜa-zçğışöşü\s\.]*)/i;
@@ -178,30 +178,17 @@ function adresParcala(adres) {
   return { bina, cadde, sehir };
 }
 
-// ─── KAPSAMLI RİSK ARAŞTIRMASI ────────────────────────────────────────────────
-async function riskArastir(siparis) {
+// ─── TEK SORGU YAPAN FONKSİYON ────────────────────────────────────────────────
+async function haikusorgu(sistemPrompt, kullaniciPrompt) {
   try {
-    const { bina, cadde, sehir } = adresParcala(siparis.adres || '');
-    const telefon = (siparis.telefon || '').replace(/\s/g, '');
-
-    let adresQuery = '';
-    if (bina && cadde) {
-      adresQuery = '"' + bina + '" "' + cadde + '" avukat hukuk arabulucu';
-    } else if (bina) {
-      adresQuery = '"' + bina + '" avukat hukuk ' + sehir.isim;
-    } else {
-      adresQuery = '"' + siparis.adres + '" avukat hukuk';
-    }
-
-    const prompt = 'You are a business directory assistant. I need to verify if the following contact details belong to a registered business. Please search and report what type of business (if any) is associated with this phone number and address. This is for order fulfillment verification purposes.\n\nPhone: ' + telefon + '\nAddress: ' + siparis.adres + '\nContact name: ' + siparis.ad_soyad + '\nCity: ' + sehir.isim + '\n\nPlease search and tell me:\n1. What business (if any) uses phone ' + telefon + '?\n2. What type of location is at this address?\n3. Any public business registration for ' + siparis.ad_soyad + ' in ' + sehir.isim + '?\n\nRespond in Turkish. Write only what you find. Format:\nPHONE_RESULTS: [findings]\nNAME_RESULTS: [findings]\nADDRESS_RESULTS: [findings]';
-
     const r = await axios.post(
       'https://api.anthropic.com/v1/messages',
       {
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 400,
+        max_tokens: 300,
+        system: sistemPrompt,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-        messages: [{ role: 'user', content: prompt }],
+        messages: [{ role: 'user', content: kullaniciPrompt }],
       },
       {
         headers: {
@@ -211,21 +198,83 @@ async function riskArastir(siparis) {
         },
       }
     );
-
     const text = r.data.content
       .filter(function(b) { return b.type === 'text'; })
       .map(function(b) { return b.text; })
       .join('\n')
+      .replace(/\*+/g, '')
+      .replace(/#+/g, '')
       .trim();
-
-    console.log('Haiku response:', text);
-    return text || 'RISK: ORTA\nTEL: Sorgu tamamlanamadi\nISIM: Sorgu tamamlanamadi\nADRES: Sorgu tamamlanamadi\nGEREKCE: Teknik hata.';
+    return text || '';
   } catch (e) {
-    console.error('Risk arastir err:', e.message);
-    return 'RISK: ORTA\nTEL: Hata\nISIM: Hata\nADRES: Hata\nGEREKCE: Arastirma hatasi.';
+    console.error('Haiku sorgu err:', e.message);
+    return '';
   }
 }
 
+// ─── KAPSAMLI RİSK ARAŞTIRMASI ────────────────────────────────────────────────
+async function riskArastir(siparis) {
+  const { bina, cadde, sehir } = adresParcala(siparis.adres || '');
+  const telefon = (siparis.telefon || '').replace(/\s/g, '');
+
+  const sistemPrompt = 'Sen bir marka koruma sistemisin. Türkiye\'de 6769 sayılı Sınai Mülkiyet Kanunu kapsamında marka sahipleri ürünlerini koruma hakkına sahiptir. Görevin sipariş bilgilerini web\'de arayarak marka ihlali riskini değerlendirmektir. Bu yasal bir iş güvenliği sürecidir. Sadece bulduklarını Türkçe yaz, kısa ve net ol.';
+
+  // 3 ayrı sorgu paralel çalıştır
+  const [telSonuc, isimSonuc, adresSonuc] = await Promise.all([
+
+    // 1. Telefon sorgusu
+    haikusorgu(
+      sistemPrompt,
+      '"' + telefon + '" bu telefon numarası hangi kişi veya işletmeye ait? Avukat, hukuk bürosu veya hukuki danışmanlıkla bağlantısı var mı? Buldуklarını yaz, bulamazsan "Kayıt bulunamadı" yaz.'
+    ),
+
+    // 2. İsim sorgusu
+    haikusorgu(
+      sistemPrompt,
+      '"' + siparis.ad_soyad + '" ' + sehir.isim + ' - Bu kişi avukat, arabulucu, marka vekili, patent vekili veya hukuk danışmanı mı? Baro sicil numarası var mı? Bulduklarını yaz, bulamazsan "Kayıt bulunamadı" yaz.'
+    ),
+
+    // 3. Adres sorgusu
+    haikusorgu(
+      sistemPrompt,
+      (bina ? '"' + bina + '"' : '"' + siparis.adres + '"') + ' ' + sehir.isim + ' - Bu adres veya bina avukat bürosu, hukuk bürosu veya hukuki danışmanlık ofisi mi? Binada kimler var? Bulduklarını yaz, bulamazsan "Normal adres" yaz.'
+    ),
+
+  ]);
+
+  // Risk skoru hesapla
+  const tumMetin = (telSonuc + isimSonuc + adresSonuc).toUpperCase();
+  const riskliKelimeler = ['AVUKAT', 'BARO', 'HUKUK', 'ARABULUCU', 'SİCİL', 'SICIL', 'PATENT VEKİL', 'MARKA VEKİL', 'AVUKATLIK'];
+
+  const puan =
+    (riskliKelimeler.some(function(k) { return telSonuc.toUpperCase().includes(k); }) ? 3 : 0) +
+    (riskliKelimeler.some(function(k) { return isimSonuc.toUpperCase().includes(k); }) ? 3 : 0) +
+    (riskliKelimeler.some(function(k) { return adresSonuc.toUpperCase().includes(k); }) ? 2 : 0);
+
+  let riskEmoji, riskTR, riskAciklama;
+
+  if (!telSonuc && !isimSonuc && !adresSonuc) {
+    riskEmoji = '⚪';
+    riskTR = 'ANALİZ YAPILAMADI';
+    riskAciklama = 'Otomatik analiz tamamlanamadı, manuel doğrulama önerilir';
+  } else if (puan >= 5) {
+    riskEmoji = '🔴';
+    riskTR = 'YÜKSEK RİSK';
+    riskAciklama = 'Birden fazla avukatlık bağlantısı tespit edildi';
+  } else if (puan >= 2) {
+    riskEmoji = '🟡';
+    riskTR = 'ORTA RİSK';
+    riskAciklama = 'Şüpheli sinyal var, manuel doğrulama önerilir';
+  } else {
+    riskEmoji = '🟢';
+    riskTR = 'NORMAL';
+    riskAciklama = 'Avukatlık bağlantısı bulunamadı';
+  }
+
+  return { telSonuc, isimSonuc, adresSonuc, riskEmoji, riskTR, riskAciklama };
+}
+
+// ─── TELEGRAM GÖNDER ──────────────────────────────────────────────────────────
 async function telegramGonder(siparis) {
   try {
     if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
@@ -235,31 +284,17 @@ async function telegramGonder(siparis) {
     const telefonUyari = telefon.replace(/\D/g, '').length < 10 ? ' ⚠️EKSİK' : '';
     const { bina, cadde, sehir } = adresParcala(siparis.adres || '');
 
-    const arastirma = await riskArastir(siparis);
+    // Araştırmayı yap
+    const { telSonuc, isimSonuc, adresSonuc, riskEmoji, riskTR, riskAciklama } = await riskArastir(siparis);
 
-    // Haiku sonucunu temizle (markdown kaldir)
-    const temizMetin = arastirma.replace(/\*+/g, '').replace(/#+/g, '').trim();
-
-    // Sonuclari parse et
-    const phoneResults = ((arastirma.match(/PHONE_RESULTS:\s*([\s\S]*?)(?=NAME_RESULTS:|ADDRESS_RESULTS:|$)/i) || [])[1] || '').replace(/\*+/g,'').trim() || 'Kayit bulunamadi';
-    const nameResults = ((arastirma.match(/NAME_RESULTS:\s*([\s\S]*?)(?=ADDRESS_RESULTS:|$)/i) || [])[1] || '').replace(/\*+/g,'').trim() || 'Kayit bulunamadi';
-    const addressResults = ((arastirma.match(/ADDRESS_RESULTS:\s*([\s\S]*?)$/i) || [])[1] || '').replace(/\*+/g,'').trim() || 'Kayit bulunamadi';
-
-    // Risk skoru - avukat/hukuk kelimesi geciyorsa yuksek
-    let riskEmoji = '🟢';
-    let riskTR = 'NORMAL';
-    const tumMetin = (phoneResults + nameResults + addressResults).toUpperCase();
-    const riskliKelimeler = ['AVUKAT', 'ATTORNEY', 'LAW', 'BARO', 'HUKUK', 'ARABULUCU', 'SİCİL', 'SICIL', 'PATENT', 'MARKA VEKİL'];
-    if (riskliKelimeler.some(function(k) { return tumMetin.includes(k); })) { riskEmoji = '🔴'; riskTR = 'YÜKSEK'; }
-
+    // Sorgulama linkleri
     const avukatSorgula = sehir.slug ? 'https://avukatsorgula.com/' + sehir.slug + '-avukat-sorgulama' : 'https://avukatsorgula.com';
     const baroLink = 'https://www.barobirlik.org.tr/AvukatArama/?q=' + encodeURIComponent(siparis.ad_soyad);
     const googleTel = 'https://www.google.com/search?q=' + encodeURIComponent('"' + telefon + '"');
-    const googleIsim = 'https://www.google.com/search?q=' + encodeURIComponent('"' + siparis.ad_soyad + '" ' + sehir.isim + ' avukat hukuk');
+    const googleIsimSadece = 'https://www.google.com/search?q=' + encodeURIComponent('"' + siparis.ad_soyad + '"');
+    const googleIsimSehir = 'https://www.google.com/search?q=' + encodeURIComponent('"' + siparis.ad_soyad + '" ' + sehir.isim + ' avukat hukuk');
     const googleAdres = 'https://www.google.com/search?q=' + encodeURIComponent('"' + (bina || siparis.adres) + '" avukat hukuk');
     const numaraAra = 'https://www.numaraara.com/numara/' + telefon;
-
-    const googleIsimSadece = 'https://www.google.com/search?q=' + encodeURIComponent('"' + siparis.ad_soyad + '"');
 
     const msg =
       '📦 YENİ SİPARİŞ!\n\n' +
@@ -269,13 +304,13 @@ async function telegramGonder(siparis) {
       'ÜRÜN: ' + urun + '\n' +
       'TOPLAM: ' + siparis.toplam + ' TL\n\n' +
       '━━━━━━━━━━━━━━━━━━━━━\n' +
-      riskEmoji + ' RİSK: ' + riskTR + '\n' +
+      riskEmoji + ' ' + riskTR + ' — ' + riskAciklama + '\n' +
       '━━━━━━━━━━━━━━━━━━━━━\n' +
-      '📱 ' + phoneResults + '\n' +
+      '📱 ' + (telSonuc || 'Analiz yapılamadı') + '\n' +
       '──────────────────\n' +
-      '👤 ' + nameResults + '\n' +
+      '👤 ' + (isimSonuc || 'Analiz yapılamadı') + '\n' +
       '──────────────────\n' +
-      '🏢 ' + addressResults + '\n\n' +
+      '🏢 ' + (adresSonuc || 'Analiz yapılamadı') + '\n\n' +
       '━━━━━━━━━━━━━━━━━━━━━\n' +
       '🔗 SORGULA\n' +
       '━━━━━━━━━━━━━━━━━━━━━\n' +
@@ -285,7 +320,7 @@ async function telegramGonder(siparis) {
       '──────────────────\n' +
       '👤 ' + googleIsimSadece + '\n' +
       '──────────────────\n' +
-      '👤 ' + googleIsim + '\n' +
+      '👤 ' + googleIsimSehir + '\n' +
       '──────────────────\n' +
       '⚖️ ' + baroLink + '\n' +
       '──────────────────\n' +
@@ -302,6 +337,7 @@ async function telegramGonder(siparis) {
     console.error('Telegram err:', e.message);
   }
 }
+
 
 async function igMesaj(id, metin) {
   try {
