@@ -186,43 +186,20 @@ async function riskArastir(siparis) {
 
     let adresQuery = '';
     if (bina && cadde) {
-      adresQuery = `"${bina}" "${cadde}" avukat hukuk arabulucu`;
+      adresQuery = '"' + bina + '" "' + cadde + '" avukat hukuk arabulucu';
     } else if (bina) {
-      adresQuery = `"${bina}" avukat hukuk arabulucu ${sehir.isim}`;
+      adresQuery = '"' + bina + '" avukat hukuk ' + sehir.isim;
     } else {
-      adresQuery = `"${siparis.adres}" avukat hukuk`;
+      adresQuery = '"' + siparis.adres + '" avukat hukuk';
     }
 
-    const prompt = `Sen bir e-ticaret güvenlik analistisin. Aşağıdaki sipariş sahibinin avukat veya avukatlıkla ilgili bir meslekte (arabulucu, hukuk danışmanı, marka vekili, patent vekili, noter, stajyer avukat vb.) çalışıp çalışmadığını araştır.
-
-SİPARİŞ BİLGİLERİ:
-Ad Soyad: ${siparis.ad_soyad}
-Telefon: ${telefon}
-Adres: ${siparis.adres}
-
-ARAŞTIRMA ADIMLARI (hepsini yap):
-1. Telefon araması: "${telefon}" site:avukatsorgula.com VEYA "${telefon}" avukat hukuk bürosu
-2. İsim araması: "${siparis.ad_soyad}" ${sehir.isim} avukat arabulucu hukuk
-3. Adres araması: ${adresQuery}
-
-DEĞERLENDİRME KURALLARI:
-- Sadece "avukat" kelimesi geçmesi yetmez, gerçek mesleki bağlantı olmalı
-- Baro sicil numarası, hukuk bürosu kaydı, arabuluculuk sertifikası → kesin kanıt
-- Sadece isim benzerliği → yeterli değil, çapraz doğrulama yap
-- Telefon numarası bir avukat sitesinde geçiyorsa → çok güçlü kanıt
-
-CEVAP FORMATINI TAM OLARAK UYGULA:
-RİSK: [YÜKSEK/ORTA/NORMAL]
-TELEFON_BULGU: [ne buldun, bulamazsan "Kayıt bulunamadı"]
-İSİM_BULGU: [ne buldun, bulamazsan "Kayıt bulunamadı"]
-ADRES_BULGU: [ne buldun, bulamazsan "Kayıt bulunamadı"]
-GEREKÇE: [neden bu riski verdin, 1-2 cümle]`;
+    const prompt = 'Sen bir e-ticaret guvenlik analistisin. Asagidaki siparis sahibinin avukat veya avukatlikla ilgili bir meslekte (arabulucu, hukuk danismani, marka vekili, patent vekili, noter) calisip calismadigini arastir.\n\nSIPARIS:\nAd: ' + siparis.ad_soyad + '\nTel: ' + telefon + '\nAdres: ' + siparis.adres + '\n\nYAP:\n1. "' + telefon + '" avukat hukuk burosu ara\n2. "' + siparis.ad_soyad + '" ' + sehir.isim + ' avukat arabulucu hukuk ara\n3. ' + adresQuery + ' ara\n\nKESINLIKLE SADECE BU FORMATI YAZ:\nRISK: YUKSEK\nTEL: [bulgu]\nISIM: [bulgu]\nADRES: [bulgu]\nGEREKCE: [1 cumle]';
 
     const r = await axios.post(
       'https://api.anthropic.com/v1/messages',
       {
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 500,
+        max_tokens: 400,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         messages: [{ role: 'user', content: prompt }],
       },
@@ -236,83 +213,65 @@ GEREKÇE: [neden bu riski verdin, 1-2 cümle]`;
     );
 
     const text = r.data.content
-      .filter(b => b.type === 'text')
-      .map(b => b.text)
+      .filter(function(b) { return b.type === 'text'; })
+      .map(function(b) { return b.text; })
       .join('\n')
       .trim();
 
-    return text || 'RİSK: ORTA\nTELEFON_BULGU: Sorgu tamamlanamadı\nİSİM_BULGU: Sorgu tamamlanamadı\nADRES_BULGU: Sorgu tamamlanamadı\nGEREKÇE: Teknik hata oluştu.';
+    console.log('Haiku response:', text);
+    return text || 'RISK: ORTA\nTEL: Sorgu tamamlanamadi\nISIM: Sorgu tamamlanamadi\nADRES: Sorgu tamamlanamadi\nGEREKCE: Teknik hata.';
   } catch (e) {
     console.error('Risk arastir err:', e.message);
-    return 'RİSK: ORTA\nTELEFON_BULGU: Hata\nİSİM_BULGU: Hata\nADRES_BULGU: Hata\nGEREKÇE: Araştırma sırasında hata oluştu.';
+    return 'RISK: ORTA\nTEL: Hata\nISIM: Hata\nADRES: Hata\nGEREKCE: Arastirma hatasi.';
   }
 }
 
-// ─── TELEGRAM GÖNDER ──────────────────────────────────────────────────────────
 async function telegramGonder(siparis) {
   try {
     if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
 
     const urun = kodaIsimCevir(siparis.urun.toUpperCase());
     const telefon = (siparis.telefon || '').replace(/\s/g, '');
-    const telefonUyari = telefon.replace(/\D/g, '').length < 10 ? '\n⚠️ TELEFON EKSİK!' : '';
+    const telefonUyari = telefon.replace(/\D/g, '').length < 10 ? ' ⚠️EKSİK' : '';
     const { bina, cadde, sehir } = adresParcala(siparis.adres || '');
 
-    // Araştırmayı yap
     const arastirma = await riskArastir(siparis);
 
-    // Sonuçları parse et
-    const riskSatir = (arastirma.match(/RİSK:\s*(.+)/) || [])[1]?.trim() || 'ORTA';
-    const telefonBulgu = (arastirma.match(/TELEFON_BULGU:\s*(.+)/) || [])[1]?.trim() || '-';
-    const isimBulgu = (arastirma.match(/İSİM_BULGU:\s*(.+)/) || [])[1]?.trim() || '-';
-    const adresBulgu = (arastirma.match(/ADRES_BULGU:\s*(.+)/) || [])[1]?.trim() || '-';
-    const gerekce = (arastirma.match(/GEREKÇE:\s*(.+)/) || [])[1]?.trim() || '-';
+    const riskSatir = ((arastirma.match(/RISK:\s*(.+)/i) || [])[1] || 'ORTA').trim();
+    const telBulgu = ((arastirma.match(/TEL:\s*(.+)/i) || [])[1] || 'Kayit bulunamadi').trim();
+    const isimBulgu = ((arastirma.match(/ISIM:\s*(.+)/i) || [])[1] || 'Kayit bulunamadi').trim();
+    const adresBulgu = ((arastirma.match(/ADRES:\s*(.+)/i) || [])[1] || 'Kayit bulunamadi').trim();
+    const gerekce = ((arastirma.match(/GEREKCE:\s*(.+)/i) || [])[1] || '-').trim();
 
     let riskEmoji = '🟡';
-    if (riskSatir === 'YÜKSEK') riskEmoji = '🔴';
-    else if (riskSatir === 'NORMAL') riskEmoji = '🟢';
+    let riskTR = 'ORTA';
+    const ru = riskSatir.toUpperCase();
+    if (ru.includes('YUKSEK') || ru.includes('YÜKSEK')) { riskEmoji = '🔴'; riskTR = 'YÜKSEK'; }
+    else if (ru.includes('NORMAL')) { riskEmoji = '🟢'; riskTR = 'NORMAL'; }
 
-    // Sorgulama linkleri
-    let adresQuery = bina && cadde
-      ? encodeURIComponent('"' + bina + '" "' + cadde + '" avukat hukuk')
-      : encodeURIComponent('"' + siparis.adres + '" avukat hukuk');
-
-    const avukatSorgula = sehir.slug
-      ? `https://avukatsorgula.com/${sehir.slug}-avukat-sorgulama`
-      : 'https://avukatsorgula.com';
-
-    const googleTel = 'https://www.google.com/search?q=' + encodeURIComponent('"' + telefon + '"');
-    const googleIsim = 'https://www.google.com/search?q=' + encodeURIComponent('"' + siparis.ad_soyad + '" ' + sehir.isim + ' avukat');
-    const googleAdres = 'https://www.google.com/search?q=' + adresQuery;
-    const googleMaps = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(siparis.adres);
+    const avukatSorgula = sehir.slug ? 'https://avukatsorgula.com/' + sehir.slug + '-avukat-sorgulama' : 'https://avukatsorgula.com';
     const baroLink = 'https://www.barobirlik.org.tr/AvukatArama/?q=' + encodeURIComponent(siparis.ad_soyad);
+    const googleTel = 'https://www.google.com/search?q=' + encodeURIComponent('"' + telefon + '"');
     const numaraAra = 'https://www.numaraara.com/numara/' + telefon;
 
     const msg =
       '📦 YENİ SİPARİŞ!\n\n' +
-      'AD SOYAD: ' + siparis.ad_soyad.toUpperCase() + '\n' +
-      'TELEFON: ' + siparis.telefon + telefonUyari + '\n' +
+      'AD: ' + siparis.ad_soyad.toUpperCase() + '\n' +
+      'TEL: ' + siparis.telefon + telefonUyari + '\n' +
       'ADRES: ' + siparis.adres.toUpperCase() + '\n' +
       'ÜRÜN: ' + urun + '\n' +
       'TOPLAM: ' + siparis.toplam + ' TL\n\n' +
       '━━━━━━━━━━━━━━━━━━━━━\n' +
-      '🔍 HAİKU ANALİZİ\n' +
+      riskEmoji + ' ANALİZ: ' + riskTR + '\n' +
       '━━━━━━━━━━━━━━━━━━━━━\n' +
-      riskEmoji + ' RİSK: ' + riskSatir + '\n\n' +
-      '📱 Telefon: ' + telefonBulgu + '\n' +
-      '👤 Kişi: ' + isimBulgu + '\n' +
-      '🏢 Adres: ' + adresBulgu + '\n' +
-      '💬 Gerekçe: ' + gerekce + '\n\n' +
-      '━━━━━━━━━━━━━━━━━━━━━\n' +
-      '🔗 MANUEL DOĞRULAMA\n' +
-      '━━━━━━━━━━━━━━━━━━━━━\n' +
-      '📱 Tel Google: ' + googleTel + '\n' +
-      '📱 Tel NumaraAra: ' + numaraAra + '\n' +
-      '👤 İsim Google: ' + googleIsim + '\n' +
-      '🏢 Adres Google: ' + googleAdres + '\n' +
-      '🗺 Harita: ' + googleMaps + '\n' +
-      '⚖️ Baro TBB: ' + baroLink + '\n' +
-      '⚖️ AvukatSorgula: ' + avukatSorgula;
+      '📱 ' + telBulgu + '\n' +
+      '👤 ' + isimBulgu + '\n' +
+      '🏢 ' + adresBulgu + '\n' +
+      '💬 ' + gerekce + '\n\n' +
+      '🔍 ' + googleTel + '\n' +
+      '📲 ' + numaraAra + '\n' +
+      '⚖️ ' + baroLink + '\n' +
+      '🔎 ' + avukatSorgula;
 
     await axios.post('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
       chat_id: TELEGRAM_CHAT_ID,
