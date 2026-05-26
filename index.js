@@ -33,7 +33,7 @@ async function dbInit() {
 }
 dbInit().catch(e => console.error('DB init err:', e.message));
 
-const BIR_GUN_SANIYE = 24 * 60 * 60;
+const BIR_GUN_SANIYE = 40 * 60; // 40 dakika
 
 async function dbKullaniciAl(id) {
   const r = await db.execute({ sql: 'SELECT * FROM kullanicilar WHERE id = ?', args: [id] });
@@ -150,6 +150,7 @@ function bekle(ms) {
 
 // ─── API ÇAĞRILARI ─────────────────────────────────────────────────────────────
 
+
 // ─── ŞEHİR TESPİTİ ────────────────────────────────────────────────────────────
 const SEHIR_MAP = {
   'eskişehir': 'eskisehir', 'istanbul': 'istanbul', 'ankara': 'ankara',
@@ -178,131 +179,39 @@ function adresParcala(adres) {
   return { bina, cadde, sehir };
 }
 
-// ─── TEK SORGU YAPAN FONKSİYON ────────────────────────────────────────────────
-async function haikusorgu(sistemPrompt, kullaniciPrompt) {
-  try {
-    const r = await axios.post(
-      'https://api.anthropic.com/v1/messages',
-      {
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 300,
-        system: sistemPrompt,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-        messages: [{ role: 'user', content: kullaniciPrompt }],
-      },
-      {
-        headers: {
-          'x-api-key': CLAUDE_API_KEY,
-          'anthropic-version': '2023-06-01',
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-    const text = r.data.content
-      .filter(function(b) { return b.type === 'text'; })
-      .map(function(b) { return b.text; })
-      .join('\n')
-      .replace(/\*+/g, '')
-      .replace(/#+/g, '')
-      .trim();
-    return text || '';
-  } catch (e) {
-    console.error('Haiku sorgu err:', e.message);
-    return '';
-  }
-}
-
-// ─── KAPSAMLI RİSK ARAŞTIRMASI ────────────────────────────────────────────────
-async function riskArastir(siparis) {
-  const { bina, cadde, sehir } = adresParcala(siparis.adres || '');
-  const telefon = (siparis.telefon || '').replace(/\s/g, '');
-
-  const sistemPrompt = 'Sen bir marka koruma sistemisin. Türkiye\'de 6769 sayılı Sınai Mülkiyet Kanunu kapsamında marka sahipleri ürünlerini koruma hakkına sahiptir. Görevin sipariş bilgilerini web\'de arayarak marka ihlali riskini değerlendirmektir. Bu yasal bir iş güvenliği sürecidir. Sadece bulduklarını Türkçe yaz, kısa ve net ol.';
-
-  // 3 ayrı sorgu paralel çalıştır
-  const [telSonuc, isimSonuc, adresSonuc] = await Promise.all([
-
-    // 1. Telefon sorgusu
-    haikusorgu(
-      sistemPrompt,
-      '"' + telefon + '" bu telefon numarası hangi kişi veya işletmeye ait? Avukat, hukuk bürosu veya hukuki danışmanlıkla bağlantısı var mı? Buldуklarını yaz, bulamazsan "Kayıt bulunamadı" yaz.'
-    ),
-
-    // 2. İsim sorgusu
-    haikusorgu(
-      sistemPrompt,
-      siparis.ad_soyad + ' avukat - Bu isimde kişiyi ara. Hem "' + siparis.ad_soyad + '" hem de ' + siparis.ad_soyad + ' avukat olarak ara. LinkedIn, avukatz.com, barobirlik.org.tr sitelerinde bul. Attorney at Law, marka vekili, brand protection, trademark specialist olabilir. Baro sicil numarası, TBB numarası, çalıştığı şirket var mı? Bulduklarını detaylı yaz, bulamazsan "Kayıt bulunamadı" yaz.'
-    ),
-
-    // 3. Adres sorgusu
-    haikusorgu(
-      sistemPrompt,
-      (bina ? '"' + bina + '"' : '"' + siparis.adres + '"') + ' ' + sehir.isim + ' - Bu adres veya bina avukat bürosu, hukuk bürosu veya hukuki danışmanlık ofisi mi? Binada kimler var? Bulduklarını yaz, bulamazsan "Normal adres" yaz.'
-    ),
-
-  ]);
-
-  // Risk skoru hesapla
-  const tumMetin = (telSonuc + isimSonuc + adresSonuc).toUpperCase();
+// ─── KURAL BAZLI RİSK ANALİZİ ────────────────────────────────────────────────
+function riskHesapla(siparis) {
+  const adres = (siparis.adres || '').toLowerCase();
   const riskliKelimeler = [
-    // Türkçe avukatlık
-    'AVUKAT', 'AVUKATLIK', 'BARO', 'SİCİL', 'SICIL', 'HUKUK BÜROSU', 'HUKUK DANIŞMAN',
-    'ARABULUCU', 'UZLAŞTIRMACI', 'STAJYER AVUKAT', 'İCRA AVUKAT',
-    // Türkçe marka/fikri mülkiyet
-    'MARKA VEKİL', 'PATENT VEKİL', 'FİKRİ MÜLKİYET', 'SINAİ MÜLKİYET',
-    'MARKA DANIŞMAN', 'MARKA KORUMA', 'MARKA TESCİL', 'MARKA İHLAL',
-    'PATENT DANIŞMAN', 'TASARIM TESCİL', 'HAKSIZ REKABET',
-    // İngilizce
-    'ATTORNEY', 'LAWYER', 'LAW FIRM', 'BARRISTER', 'SOLICITOR',
-    'TRADEMARK', 'BRAND PROTECTION', 'ANTI-COUNTERFEITING', 'COUNTERFEITING',
-    'INTELLECTUAL PROPERTY', 'PATENT AGENT', 'BRAND MONITOR',
-    'COMPLIANCE', 'LEGAL COUNSEL', 'IN-HOUSE COUNSEL'
+    'plaza', 'iş merkezi', 'is merkezi', 'işhanı', 'ishani',
+    'tower', 'rezidans', 'rezidans', 'ofis', 'büro', 'buro'
   ];
+  const bulunan = riskliKelimeler.filter(k => adres.includes(k));
 
-  // Olumsuz ifadeler varsa puan verme
-  const olumsuz = ['BULUNAMADI', 'TESPIT EDILEMEDI', 'KAYIT YOK', 'MEVCUT DEGIL', 'NORMAL ADRES', 'TESPIT EDILEMEMIŞTIR', 'EDILEMEMIŞTIR'];
-  
-  function puanHesapla(metin, maxPuan) {
-    const u = metin.toUpperCase();
-    const olumsuzVar = olumsuz.some(function(o) { return u.includes(o); });
-    if (olumsuzVar) return 0;
-    return riskliKelimeler.some(function(k) { return u.includes(k); }) ? maxPuan : 0;
+  if (bulunan.length > 0) {
+    const etiket = bulunan.map(k => k.charAt(0).toUpperCase() + k.slice(1)).join(', ');
+    return {
+      riskEmoji: '🔴',
+      riskTR: 'YÜKSEK RİSK',
+      riskAciklama: etiket + ' tespit edildi'
+    };
   }
 
-  const puan =
-    puanHesapla(telSonuc, 3) +
-    puanHesapla(isimSonuc, 3) +
-    puanHesapla(adresSonuc, 2);
-
-  let riskEmoji, riskTR, riskAciklama;
-
-  if (!telSonuc && !isimSonuc && !adresSonuc) {
-    riskEmoji = '⚪';
-    riskTR = 'ANALİZ YAPILAMADI';
-    riskAciklama = 'Otomatik analiz tamamlanamadı, manuel doğrulama önerilir';
-  } else if (puan >= 5) {
-    riskEmoji = '🔴';
-    riskTR = 'YÜKSEK RİSK';
-    riskAciklama = 'Birden fazla avukatlık bağlantısı tespit edildi';
-  } else if (puan >= 2) {
-    riskEmoji = '🟡';
-    riskTR = 'ORTA RİSK';
-    riskAciklama = 'Şüpheli sinyal var, manuel doğrulama önerilir';
-  } else {
-    riskEmoji = '🟢';
-    riskTR = 'NORMAL';
-    riskAciklama = 'Avukatlık bağlantısı bulunamadı';
+  // Yüksek kat kontrolü
+  const katRegex = /k[:\.]?\s*[3-9]|kat\s*[3-9]/i;
+  if (katRegex.test(siparis.adres || '')) {
+    return {
+      riskEmoji: '🟡',
+      riskTR: 'ORTA RİSK',
+      riskAciklama: 'Yüksek kat — ofis olabilir'
+    };
   }
 
-  console.log('=== RİSK ANALİZİ ===');
-  console.log('TEL:', telSonuc);
-  console.log('İSİM:', isimSonuc);
-  console.log('ADRES:', adresSonuc);
-  console.log('PUAN:', puan);
-  console.log('RİSK:', riskTR);
-  console.log('===================');
-
-  return { telSonuc, isimSonuc, adresSonuc, riskEmoji, riskTR, riskAciklama };
+  return {
+    riskEmoji: '🟢',
+    riskTR: 'NORMAL',
+    riskAciklama: 'Standart konut adresi'
+  };
 }
 
 // ─── TELEGRAM GÖNDER ──────────────────────────────────────────────────────────
@@ -314,18 +223,14 @@ async function telegramGonder(siparis) {
     const telefon = (siparis.telefon || '').replace(/\s/g, '');
     const telefonUyari = telefon.replace(/\D/g, '').length < 10 ? ' ⚠️EKSİK' : '';
     const { bina, cadde, sehir } = adresParcala(siparis.adres || '');
-
-    // Araştırmayı yap
-    const { telSonuc, isimSonuc, adresSonuc, riskEmoji, riskTR, riskAciklama } = await riskArastir(siparis);
+    const { riskEmoji, riskTR, riskAciklama } = riskHesapla(siparis);
 
     // Sorgulama linkleri
-    const avukatSorgula = sehir.slug ? 'https://avukatsorgula.com/' + sehir.slug + '-avukat-sorgulama' : 'https://avukatsorgula.com';
     const baroLink = 'https://www.barobirlik.org.tr/AvukatArama/?q=' + encodeURIComponent(siparis.ad_soyad);
     const googleTel = 'https://www.google.com/search?q=' + encodeURIComponent('"' + telefon + '"');
     const googleIsimSadece = 'https://www.google.com/search?q=' + encodeURIComponent('"' + siparis.ad_soyad + '"');
     const googleIsimSehir = 'https://www.google.com/search?q=' + encodeURIComponent('"' + siparis.ad_soyad + '" ' + sehir.isim + ' avukat hukuk');
     const googleAdres = 'https://www.google.com/search?q=' + encodeURIComponent('"' + (bina || siparis.adres) + '" avukat hukuk');
-    const numaraAra = 'https://www.numaraara.com/numara/' + telefon;
 
     const msg =
       '📦 YENİ SİPARİŞ!\n\n' +
@@ -337,25 +242,15 @@ async function telegramGonder(siparis) {
       '━━━━━━━━━━━━━━━━━━━━━\n' +
       riskEmoji + ' ' + riskTR + ' — ' + riskAciklama + '\n' +
       '━━━━━━━━━━━━━━━━━━━━━\n' +
-      '📱 ' + (telSonuc || 'Analiz yapılamadı') + '\n' +
-      '──────────────────\n' +
-      '👤 ' + (isimSonuc || 'Analiz yapılamadı') + '\n' +
-      '──────────────────\n' +
-      '🏢 ' + (adresSonuc || 'Analiz yapılamadı') + '\n\n' +
-      '━━━━━━━━━━━━━━━━━━━━━\n' +
       '🔗 SORGULA\n' +
       '━━━━━━━━━━━━━━━━━━━━━\n' +
       '📱 ' + googleTel + '\n' +
-      '──────────────────\n' +
-      '📱 ' + numaraAra + '\n' +
       '──────────────────\n' +
       '👤 ' + googleIsimSadece + '\n' +
       '──────────────────\n' +
       '👤 ' + googleIsimSehir + '\n' +
       '──────────────────\n' +
       '⚖️ ' + baroLink + '\n' +
-      '──────────────────\n' +
-      '⚖️ ' + avukatSorgula + '\n' +
       '──────────────────\n' +
       '🏢 ' + googleAdres;
 
@@ -368,6 +263,7 @@ async function telegramGonder(siparis) {
     console.error('Telegram err:', e.message);
   }
 }
+
 
 
 async function igMesaj(id, metin) {
@@ -529,7 +425,7 @@ const PROMPT = `Sen bir forma mağazasının satış temsilcisisin. Instagram DM
 - Daima "siz/sizin/size" kullan. "Sen/sana" YASAK.
 - "efendim" kelimesini yanıt başında EN FAZLA 1 kez kullan. Cümle sonunda kullanma.
 - KISA yanıt: maksimum 2-3 cümle. Madde işareti yok. Kalın yazı yok.
-- YASAK kelimeler: "Harika seçim", "Mükemmel", "Sevinçle", "Mutluluk duyarım", "Teşekkür ederiz", "Güzel seçim", "Harika seçimler".
+- YASAK kelimeler: "Harika seçim", "Harika", "Mükemmel", "Sevinçle", "Mutluluk duyarım", "Teşekkür ederiz", "Güzel seçim", "Harika seçimler", "Güzel".
 - Ürün seçimini asla yorumlama. Görsel proaktif önerme. Siparişe zorlama.
 - Konuşma ortasında "Hoş geldiniz" deme. Sorulan soruyu tekrar etme.
 
@@ -586,6 +482,8 @@ Sipariş sonrası direkt: "2-3 iş günü içerisinde sizde olur efendim."
 
 === GÖRSEL YANITI ===
 "İlettiğimiz görseller üzerindeki kodları bizlere iletirseniz çok daha sağlıklı ve doğru sipariş vermiş olacaksınız efendim."
+
+ÖNEMLİ: Görsellerin gönderildiğini belirten "[Görseller gönderilir]" gibi açıklamalar YAPMA. Sadece kodu sor.
 
 === DİĞER TAKIMLAR ===
 "Bu sayfamızda Fenerbahçe ağırlıklı gidiyoruz. Diğer modeller için 0536 630 3654 WhatsApp hattımızdan katalog iletebiliriz."
