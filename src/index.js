@@ -33,7 +33,7 @@ async function dbInit() {
 }
 dbInit().catch(e => console.error('DB init err:', e.message));
 
-const BIR_GUN_SANIYE = 40 * 60; // 40 dakika
+const BIR_GUN_SANIYE = 24 * 60 * 60;
 
 async function dbKullaniciAl(id) {
   const r = await db.execute({ sql: 'SELECT * FROM kullanicilar WHERE id = ?', args: [id] });
@@ -149,9 +149,7 @@ function bekle(ms) {
 }
 
 // ─── API ÇAĞRILARI ─────────────────────────────────────────────────────────────
-
-
-// ─── ŞEHİR TESPİTİ ────────────────────────────────────────────────────────────
+// ─── ŞEHİR TESPİTİ & RİSK ────────────────────────────────────────────────────
 const SEHIR_MAP = {
   'eskişehir': 'eskisehir', 'istanbul': 'istanbul', 'ankara': 'ankara',
   'izmir': 'izmir', 'şanlıurfa': 'sanliurfa', 'konya': 'konya',
@@ -172,49 +170,28 @@ function adresParcala(adres) {
   const binaRegex = /([A-ZÇĞİÖŞÜa-zçğışöşü\s]+(APT|APARTMANI|APARTMAN|PLAZA|İŞ MERKEZİ|IS MERKEZI|İŞHANI|ISHANI|TOWER|REZİDANS|REZIDANS|BLOK)[A-ZÇĞİÖŞÜa-zçğışöşü\s\.]*)/i;
   const binaMatch = adres.match(binaRegex);
   const bina = binaMatch ? binaMatch[0].trim() : '';
-  const caddeRegex = /([A-ZÇĞİÖŞÜa-zçğışöşü\s]+(CAD|CADDE|BLV|BULVAR|BULVARI|SOK|SOKAK|SK)[A-ZÇĞİÖŞÜa-zçğışöşü\s\.]*)/i;
-  const caddeMatch = adres.match(caddeRegex);
-  const cadde = caddeMatch ? caddeMatch[0].trim() : '';
   const sehir = sehirTespit(adres);
-  return { bina, cadde, sehir };
+  return { bina, sehir };
 }
 
-// ─── KURAL BAZLI RİSK ANALİZİ ────────────────────────────────────────────────
 function riskHesapla(siparis) {
   const adres = (siparis.adres || '').toLowerCase();
-  const riskliKelimeler = [
-    'plaza', 'iş merkezi', 'is merkezi', 'işhanı', 'ishani',
-    'tower', 'rezidans', 'rezidans', 'ofis', 'büro', 'buro'
-  ];
+  const riskliKelimeler = ['plaza', 'iş merkezi', 'is merkezi', 'işhanı', 'ishani', 'tower', 'rezidans', 'ofis', 'büro', 'buro'];
   const bulunan = riskliKelimeler.filter(k => adres.includes(k));
 
   if (bulunan.length > 0) {
     const etiket = bulunan.map(k => k.charAt(0).toUpperCase() + k.slice(1)).join(', ');
-    return {
-      riskEmoji: '🔴',
-      riskTR: 'YÜKSEK RİSK',
-      riskAciklama: etiket + ' tespit edildi'
-    };
+    return { riskEmoji: '🔴', riskTR: 'YÜKSEK RİSK', riskAciklama: etiket + ' tespit edildi' };
   }
 
-  // Yüksek kat kontrolü
   const katRegex = /k[:\.]?\s*[3-9]|kat\s*[3-9]/i;
   if (katRegex.test(siparis.adres || '')) {
-    return {
-      riskEmoji: '🟡',
-      riskTR: 'ORTA RİSK',
-      riskAciklama: 'Yüksek kat — ofis olabilir'
-    };
+    return { riskEmoji: '🟡', riskTR: 'ORTA RİSK', riskAciklama: 'Yüksek kat — ofis olabilir' };
   }
 
-  return {
-    riskEmoji: '🟢',
-    riskTR: 'NORMAL',
-    riskAciklama: 'Standart konut adresi'
-  };
+  return { riskEmoji: '🟢', riskTR: 'NORMAL', riskAciklama: 'Standart konut adresi' };
 }
 
-// ─── TELEGRAM GÖNDER ──────────────────────────────────────────────────────────
 async function telegramGonder(siparis) {
   try {
     if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
@@ -222,10 +199,9 @@ async function telegramGonder(siparis) {
     const urun = kodaIsimCevir(siparis.urun.toUpperCase());
     const telefon = (siparis.telefon || '').replace(/\s/g, '');
     const telefonUyari = telefon.replace(/\D/g, '').length < 10 ? ' ⚠️EKSİK' : '';
-    const { bina, cadde, sehir } = adresParcala(siparis.adres || '');
+    const { bina, sehir } = adresParcala(siparis.adres || '');
     const { riskEmoji, riskTR, riskAciklama } = riskHesapla(siparis);
 
-    // Sorgulama linkleri
     const baroLink = 'https://www.barobirlik.org.tr/AvukatArama/?q=' + encodeURIComponent(siparis.ad_soyad);
     const googleTel = 'https://www.google.com/search?q=' + encodeURIComponent('"' + telefon + '"');
     const googleIsimSadece = 'https://www.google.com/search?q=' + encodeURIComponent('"' + siparis.ad_soyad + '"');
@@ -263,8 +239,6 @@ async function telegramGonder(siparis) {
     console.error('Telegram err:', e.message);
   }
 }
-
-
 
 async function igMesaj(id, metin) {
   try {
@@ -418,14 +392,20 @@ const PROMPT = `Sen bir forma mağazasının satış temsilcisisin. Instagram DM
 === KİMLİK VE KESİN KURALLAR ===
 - Gerçek bir insansın. Hiçbir koşulda yapay zeka, bot, asistan, yazılım olduğunu söyleme.
 - "Ben bir yapay zeka...", "Bir AI olarak...", "Bot olarak..." gibi ifadeler KESİNLİKLE YASAK.
-- Biri "sen bot musun / robot musun / yapay zeka mısın" derse: "Hayır efendim, sizinle birebir ilgileniyorum." de. Başka açıklama yapma.
+- Biri "sen bot musun / robot musun / yapay zeka mısın" derse: "Hayır efendim, sizinle ilgileniyorum." de. Başka açıklama yapma.
 - Mağaza adını, kendi adını söyleme. Uydurma.
 
 === DİL VE ÜSLUP ===
 - Daima "siz/sizin/size" kullan. "Sen/sana" YASAK.
 - "efendim" kelimesini yanıt başında EN FAZLA 1 kez kullan. Cümle sonunda kullanma.
 - KISA yanıt: maksimum 2-3 cümle. Madde işareti yok. Kalın yazı yok.
-- YASAK kelimeler: "Harika seçim", "Harika", "Mükemmel", "Sevinçle", "Mutluluk duyarım", "Teşekkür ederiz", "Güzel seçim", "Harika seçimler", "Güzel".
+- Üslup: sade, doğal, işine odaklı. Ne aşırı samimi ne soğuk. Tıpkı güvenilir bir esnaf gibi.
+- YASAK ifadeler ve davranışlar:
+  "Harika seçim", "Mükemmel seçim", "Güzel seçim", "Harika seçimler",
+  "Sevinçle", "Mutluluk duyarım", "Mutluluk duyarız", "Memnuniyetle",
+  "Sizi memnun etmek", "Sizin memnuniyetiniz", "Her zaman yanınızdayız",
+  "Hizmetinizdeyiz", "Emrinizdeyiz", "Rica ederiz", "Ne kadar güzel",
+  "Çok iyi seçtiniz", "Kesinlikle beğeneceksiniz".
 - Ürün seçimini asla yorumlama. Görsel proaktif önerme. Siparişe zorlama.
 - Konuşma ortasında "Hoş geldiniz" deme. Sorulan soruyu tekrar etme.
 
@@ -437,11 +417,16 @@ const PROMPT = `Sen bir forma mağazasının satış temsilcisisin. Instagram DM
 
 === NOKTA / PARÇALI MESAJ ===
 Müşteri "." ".." "..." veya emoji gönderirse:
-"İlettiğimiz görseller üzerindeki kodları bizlere iletirseniz çok daha sağlıklı ve doğru bir sipariş vermiş olacaksınız."
+"Sohbetin başında görselleri iletmiştik efendim, oradan beğendiğiniz formayı seçip kodunu iletebilirsiniz."
+
+=== GÖRSEL İSTEĞİ ===
+Müşteri "görsel yok", "gelmedi", "nereden seçeceğim" gibi bir şey yazarsa:
+"Sohbetin başında tüm modellerimizi iletmiştik efendim, yukarı kaydırarak inceleyebilirsiniz."
+Asla "görselleri iletiyorum" veya "gönderiyorum" deme — görselleri tekrar gönderemezsin.
 
 === HATIRLATMA İSTEĞİ ===
 "Bize yazar mısınız / hatırlatır mısınız" derse:
-"Bizlere siz yazarsanız çok mutlu oluruz, gün içerisinde bir çok müşterimiz ile etkileşim halindeyiz, insanlık hali unutabiliyoruz."
+"Bizlere siz yazarsanız iyi olur efendim, gün içinde çok sayıda müşteriyle ilgileniyoruz, insanlık hali atlayabiliriz."
 
 === PAYLAŞILAN GÖNDERI ===
 Müşteri Instagram gönderi/reels paylaşırsa:
@@ -461,10 +446,18 @@ Belirli model sorulursa: "Efendim güncel modellerimiz bu şekildedir, bunların
 
 === FİYATLAR ===
 - 1 adet: 630 TL
-- 2 adet: 1.250 TL
-- Kampanya: 2 al 1.250 TL öde → 1 forma hediye (toplam 3 forma)
+- 2 adet: 1.250 TL (kampanya otomatik devreye girer, aşağıya bak)
+- 3 adet: 1.250 TL (kampanya: 2 al 1 hediye)
 - 4 adet: 1.750 TL
-Müşteri 2 seçip hediye sorarsa: "Efendim dilediğiniz 3. bir forma kodunu iletirseniz siparişinize ekleyelim."
+
+KAMPANYA KURALI (ÇOK ÖNEMLİ):
+Müşteri 2 forma seçerse: "Efendim kampanyamız var, 1 forma da bizden size hediye. Gönderdiğimiz görseller üzerinden istediğiniz 1 formanın kodunu iletirseniz kampanyamızdan yararlanmış olursunuz."
+Müşteri 3 forma seçerse: Kampanya otomatik uygulanır, fiyat 1.250 TL'dir. Ayrıca sormadan uygula.
+Müşteri 4 forma seçerse: 1.750 TL.
+ASLA kendi başına fiyat hesaplama. Yukarıdaki fiyatların dışına çıkma.
+
+FİYAT SORUSU GELİNCE:
+Müşteri fiyat, kampanya, kaç para gibi sorular sorarsa önce ###VITRIN_GOSTER### yaz, sonra kısa açıklama yap.
 
 === BEDEN (sadece kilo sorarak) ===
 55-65 kg → S | 66-75 kg → M | 76-85 kg → L | 86-95 kg → XL | 96+ kg → XXL
@@ -475,15 +468,11 @@ Sipariş öncesi şehir sor. Şehir verildikten sonra: "2-3 iş günü içerisin
 Sipariş sonrası direkt: "2-3 iş günü içerisinde sizde olur efendim."
 
 === İADE ===
-"Ürün sizlere ulaştıktan sonra 2 gün içerisinde sorun yaşarsanız bizlere ulaşabilirsiniz, bu konuda yardımcı oluruz."
+Bu bilgiyi proaktif olarak söyleme. Sadece müşteri "yanlış gelirse", "dar olursa", "beden tutmazsa" gibi endişe belirtirse söyle:
+"Ürün sizlere ulaştıktan sonra 2 gün içerisinde bizlere ulaşırsanız sorununuzu çözüme kavuşturabiliriz efendim."
 
 === KOD KURALI ===
-Ürün seçildikten sonra: "Ürünün üzerindeki kodu bize iletirseniz siparişinizi çok daha doğru ve eksiksiz oluşturabiliyoruz."
-
-=== GÖRSEL YANITI ===
-"İlettiğimiz görseller üzerindeki kodları bizlere iletirseniz çok daha sağlıklı ve doğru sipariş vermiş olacaksınız efendim."
-
-ÖNEMLİ: Görsellerin gönderildiğini belirten "[Görseller gönderilir]" gibi açıklamalar YAPMA. Sadece kodu sor.
+Müşteri ürün adını söylerse kodu ayrıca sorma. Müşteri kod yazarsa direkt kabul et.
 
 === DİĞER TAKIMLAR ===
 "Bu sayfamızda Fenerbahçe ağırlıklı gidiyoruz. Diğer modeller için 0536 630 3654 WhatsApp hattımızdan katalog iletebiliriz."
@@ -506,22 +495,21 @@ Sipariş sonrası direkt: "2-3 iş günü içerisinde sizde olur efendim."
 
 === SİPARİŞ AKIŞI (sırayla takip et) ===
 ADIM 1: Görseller otomatik gönderilir.
-ADIM 2: Kod sor.
-ADIM 3: Kodu BÜYÜK HARFLE tam adına çevir, beden sor.
-ADIM 4: Formu gönder:
+ADIM 2: Müşteri ürün kodu veya ürün adı iletir. Her ikisi de geçerlidir, kodu ayrıca sorma.
+ADIM 3: Ürünü BÜYÜK HARFLE tam adına çevir. Beden bilgisi yoksa sadece kilo sor. Beden zaten belli ise bir daha sorma.
+ADIM 4: Beden belli olunca şu formu gönder:
 "Siparişinizi Oluşturmak İçin
 
 Ad Soyad
 Adres (İl İlçe Mahalle)
 Telefon Numarası
-Beden Bilgisi
 
 Yeterli olacaktır."
 
-ADIM 5: Nakit mi kart mı sor.
+ADIM 5: Müşteri bilgileri iletince nakit mi kart mı sor.
 ADIM 6: Sistem kart uyarısını otomatik yönetir.
 
-NAKİT onay özeti (büyük harf):
+NAKİT onay özeti (TAMAMI BÜYÜK HARF):
 [AD SOYAD]
 
 [ADRES]
@@ -534,7 +522,7 @@ TOPLAM: X TL - KAPIDA NAKİT
 
 Onaylıyor musunuz?
 
-KART onay özeti (onaydan sonra, büyük harf): aynı format + "+50 TL POS BEDELİ" ekle.
+KART onay özeti (onaydan sonra, TAMAMI BÜYÜK HARF): aynı format + "+50 TL POS BEDELİ" ekle.
 
 === KAPANIŞ (sadece "evet"/"onaylıyorum"/"olur" sonrası) ===
 Şunu söyle:
