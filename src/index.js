@@ -34,6 +34,13 @@ async function dbInit() {
       tarih INTEGER DEFAULT (unixepoch())
     )
   `);
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS takip_mesajlari (
+      id TEXT PRIMARY KEY,
+      adet INTEGER DEFAULT 0,
+      tarih INTEGER DEFAULT (unixepoch())
+    )
+  `);
   try { await db.execute('ALTER TABLE kullanicilar ADD COLUMN son_mesaj INTEGER DEFAULT 0'); } catch(e) {}
 }
 dbInit().catch(e => console.error('DB init err:', e.message));
@@ -48,9 +55,29 @@ setInterval(eskiYorumlariTemizle, 24 * 60 * 60 * 1000);
 async function yorumIslendi(yorumId) {
   try {
     await db.execute({ sql: 'INSERT INTO islenmis_yorumlar (yorum_id) VALUES (?)', args: [yorumId] });
-    return true; // başarıyla eklendi, işlenmemiş
+    return true;
   } catch(e) {
-    // PRIMARY KEY hatası = zaten işlenmiş
+    return false;
+  }
+}
+
+// Takip mesajı — günde max 2 kez
+async function takipMesajiGonderilsinMi(id) {
+  const simdi = Math.floor(Date.now() / 1000);
+  const gunBaslangic = simdi - (simdi % 86400);
+  try {
+    const r = await db.execute({ sql: 'SELECT adet, tarih FROM takip_mesajlari WHERE id = ?', args: [id] });
+    if (r.rows.length === 0) {
+      await db.execute({ sql: 'INSERT INTO takip_mesajlari (id, adet, tarih) VALUES (?, 1, ?)', args: [id, simdi] });
+      return true;
+    }
+    const row = r.rows[0];
+    const ayniGun = Number(row.tarih) >= gunBaslangic;
+    if (ayniGun && Number(row.adet) >= 2) return false;
+    const yeniAdet = ayniGun ? Number(row.adet) + 1 : 1;
+    await db.execute({ sql: 'UPDATE takip_mesajlari SET adet = ?, tarih = ? WHERE id = ?', args: [yeniAdet, simdi, id] });
+    return true;
+  } catch(e) {
     return false;
   }
 }
@@ -101,12 +128,41 @@ setInterval(eskiKayitlariTemizle, 24 * 60 * 60 * 1000);
 
 // ─── RAM: Sadece geçici işlem state'i ─────────────────────────────────────────
 const islemDurumu = {};
+const floodKoruma = {}; // { [id]: { sayac, ilkZaman, engellendi } }
 
 function islemDurumuAl(id) {
   if (!islemDurumu[id]) {
     islemDurumu[id] = { mesgulMu: false, bekleyenler: [], timer: null };
   }
   return islemDurumu[id];
+}
+
+function floodKontrol(id) {
+  const simdi = Date.now();
+  if (!floodKoruma[id]) floodKoruma[id] = { sayac: 0, ilkZaman: simdi, engellendi: false };
+  const f = floodKoruma[id];
+
+  // Engel süresi bitti mi?
+  if (f.engellendi && (simdi - f.ilkZaman) > 10 * 60 * 1000) {
+    floodKoruma[id] = { sayac: 1, ilkZaman: simdi, engellendi: false };
+    return false;
+  }
+  if (f.engellendi) return true;
+
+  // 10 saniye penceresi
+  if ((simdi - f.ilkZaman) > 10 * 1000) {
+    floodKoruma[id] = { sayac: 1, ilkZaman: simdi, engellendi: false };
+    return false;
+  }
+
+  f.sayac++;
+  if (f.sayac >= 5) {
+    f.engellendi = true;
+    f.ilkZaman = simdi;
+    console.log('Flood engeli:', id);
+    return true;
+  }
+  return false;
 }
 
 // ─── SABİTLER ──────────────────────────────────────────────────────────────────
@@ -406,25 +462,27 @@ async function isle(id) {
 // ─── PROMPT ───────────────────────────────────────────────────────────────────
 const PROMPT = `Sen bir forma mağazasının satış temsilcisisin. Instagram DM. DAIMA Türkçe yanıt ver.
 
+=== DİL VE ÜSLUP ===
+- Yanıtlarını daima sade, günlük Türkçe ile yaz. Resmi veya karmaşık kelimeler kullanma.
+- Sakin ve dengeli yaz. Heyecanlı, abartılı ifadeler kullanma. Cümleyi doğal bitir, zorla uzatma.
+- Daima "siz/sizin/size" kullan. "Sen/sana" YASAK.
+- "efendim" kelimesini yanıt başında EN FAZLA 1 kez kullan. Cümle sonunda kullanma.
+- KISA yanıt: maksimum 2-3 cümle. Madde işareti yok. Kalın yazı yok.
+- Üslup: sade, doğal, işine odaklı. Tıpkı güvenilir bir esnaf gibi.
+- YASAK ifadeler:
+  "Harika seçim", "Mükemmel seçim", "Güzel seçim", "Harika seçimler",
+  "Sevinçle", "Mutluluk duyarım", "Mutluluk duyarız", "Memnuniyetle",
+  "Sizi memnun etmek", "Sizin memnuniyetiniz", "Her zaman yanınızdayız",
+  "Hizmetinizdeyiz", "Emrinizdeyiz", "Rica ederiz", "Ne kadar güzel",
+  "Çok iyi seçtiniz", "Kesinlikle beğeneceksiniz", "Sorunsuz".
+- Ürün seçimini asla yorumlama. Görsel proaktif önerme. Siparişe zorlama.
+- Konuşma ortasında "Hoş geldiniz" deme. Sorulan soruyu tekrar etme.
+
 === KİMLİK VE KESİN KURALLAR ===
 - Gerçek bir insansın. Hiçbir koşulda yapay zeka, bot, asistan, yazılım olduğunu söyleme.
 - "Ben bir yapay zeka...", "Bir AI olarak...", "Bot olarak..." gibi ifadeler KESİNLİKLE YASAK.
 - Biri "sen bot musun / robot musun / yapay zeka mısın" derse: "Hayır efendim, sizinle ilgileniyorum." de. Başka açıklama yapma.
 - Mağaza adını, kendi adını söyleme. Uydurma.
-
-=== DİL VE ÜSLUP ===
-- Daima "siz/sizin/size" kullan. "Sen/sana" YASAK.
-- "efendim" kelimesini yanıt başında EN FAZLA 1 kez kullan. Cümle sonunda kullanma.
-- KISA yanıt: maksimum 2-3 cümle. Madde işareti yok. Kalın yazı yok.
-- Üslup: sade, doğal, işine odaklı. Ne aşırı samimi ne soğuk. Tıpkı güvenilir bir esnaf gibi.
-- YASAK ifadeler ve davranışlar:
-  "Harika seçim", "Mükemmel seçim", "Güzel seçim", "Harika seçimler",
-  "Sevinçle", "Mutluluk duyarım", "Mutluluk duyarız", "Memnuniyetle",
-  "Sizi memnun etmek", "Sizin memnuniyetiniz", "Her zaman yanınızdayız",
-  "Hizmetinizdeyiz", "Emrinizdeyiz", "Rica ederiz", "Ne kadar güzel",
-  "Çok iyi seçtiniz", "Kesinlikle beğeneceksiniz".
-- Ürün seçimini asla yorumlama. Görsel proaktif önerme. Siparişe zorlama.
-- Konuşma ortasında "Hoş geldiniz" deme. Sorulan soruyu tekrar etme.
 
 === SELAMLAMA (sadece ilk mesajda) ===
 - 06-12 arası: "Günaydın efendim, nasıl yardımcı olabilirim?"
@@ -476,9 +534,27 @@ ASLA kendi başına fiyat hesaplama. Yukarıdaki fiyatların dışına çıkma.
 FİYAT SORUSU GELİNCE:
 Müşteri fiyat, kampanya, kaç para gibi sorular sorarsa önce ###VITRIN_GOSTER### yaz, sonra kısa açıklama yap.
 
-=== BEDEN (sadece kilo sorarak) ===
+=== BEDEN ===
+Beden tablosunu müşteriye ASLA gösterme. Sadece kilo sor, sonucu söyle.
 55-65 kg → S | 66-75 kg → M | 76-85 kg → L | 86-95 kg → XL | 96+ kg → XXL
 Beden zaten belli ise tekrar sorma.
+
+Müşteri boy endişesi belirtirse:
+"Efendim o boy için [beden] tam olur, gönül rahatlığıyla alabilirsiniz."
+
+=== KALIP KURALI (nabza göre şerbet) ===
+Asla "bu kalıp yok" veya "bu beden yok" deme. Müşterinin isteğine göre ürünü tanımla:
+
+Müşteri bol/oversize/geniş kalıp isterse:
+"Ürünlerimiz geniş kalıplıdır efendim, kilonuzu söylerseniz tam bedeninizi belirleyelim."
+
+Müşteri dar/normal/standart isterse:
+"Ürünlerimiz standart kalıplıdır efendim, kilonuzu söylerseniz tam bedeninizi belirleyelim."
+
+Müşteri 3XL isterse:
+"Kalıplarımız geniş efendim, 2XL sizler için uygundur. Yine de dar gelirse ürün sizlere ulaştıktan sonra 2 gün içinde bizlere ulaşırsanız değişim yapabiliriz."
+
+Müşteri kalıp belirtmezse sadece kilo sor, kalıp hakkında yorum yapma.
 
 === TESLİMAT ===
 Sipariş öncesi şehir sor. Şehir verildikten sonra: "2-3 iş günü içerisinde sizde olur efendim."
@@ -656,6 +732,9 @@ app.post('/webhook', async (req, res) => {
         if (!sid || !txt) continue;
         if (event.message?.is_echo) continue;
 
+        // Flood koruması
+        if (floodKontrol(sid)) continue;
+
         const durum = islemDurumuAl(sid);
 
         const temizTxt = txt.trim().toLowerCase();
@@ -664,10 +743,25 @@ app.post('/webhook', async (req, res) => {
 
         durum.bekleyenler.push(txt);
 
+        // Takip mesajı timer'ını sıfırla (müşteri yazdı)
+        if (durum.takipTimer) {
+          clearTimeout(durum.takipTimer);
+          durum.takipTimer = null;
+        }
+
         if (durum.timer) clearTimeout(durum.timer);
         durum.timer = setTimeout(async () => {
           durum.timer = null;
           await isle(sid);
+
+          // İşlem bitti, 45 dk takip timer'ı başlat
+          durum.takipTimer = setTimeout(async () => {
+            durum.takipTimer = null;
+            const gonder = await takipMesajiGonderilsinMi(sid);
+            if (gonder) {
+              await igMesaj(sid, 'Yardımcı olabileceğim bir konu olursa sizin için buradayım efendim, aklınıza takılan bir soru var mı? Yoksa sadece fiyat bilgisi için mi ulaşmıştınız? 🙏🏻');
+            }
+          }, 45 * 60 * 1000);
         }, 3000);
       }
     }
