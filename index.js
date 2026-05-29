@@ -28,9 +28,32 @@ async function dbInit() {
       guncelleme INTEGER DEFAULT (unixepoch())
     )
   `);
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS islenmis_yorumlar (
+      yorum_id TEXT PRIMARY KEY,
+      tarih INTEGER DEFAULT (unixepoch())
+    )
+  `);
   try { await db.execute('ALTER TABLE kullanicilar ADD COLUMN son_mesaj INTEGER DEFAULT 0'); } catch(e) {}
 }
 dbInit().catch(e => console.error('DB init err:', e.message));
+
+// 7 günden eski işlenmiş yorumları temizle
+async function eskiYorumlariTemizle() {
+  const sinir = Math.floor(Date.now() / 1000) - 7 * 24 * 3600;
+  await db.execute({ sql: 'DELETE FROM islenmis_yorumlar WHERE tarih < ?', args: [sinir] });
+}
+setInterval(eskiYorumlariTemizle, 24 * 60 * 60 * 1000);
+
+async function yorumIslendi(yorumId) {
+  try {
+    await db.execute({ sql: 'INSERT INTO islenmis_yorumlar (yorum_id) VALUES (?)', args: [yorumId] });
+    return true; // başarıyla eklendi, işlenmemiş
+  } catch(e) {
+    // PRIMARY KEY hatası = zaten işlenmiş
+    return false;
+  }
+}
 
 const BIR_GUN_SANIYE = 24 * 60 * 60;
 
@@ -78,11 +101,6 @@ setInterval(eskiKayitlariTemizle, 24 * 60 * 60 * 1000);
 
 // ─── RAM: Sadece geçici işlem state'i ─────────────────────────────────────────
 const islemDurumu = {};
-
-// İşlenmiş yorum ID'leri — aynı yoruma 2 kez cevap vermeyi önler
-const islenmisYorumlar = new Set();
-// Set çok büyümesin diye 1 saatte bir temizle
-setInterval(() => islenmisYorumlar.clear(), 60 * 60 * 1000);
 
 function islemDurumuAl(id) {
   if (!islemDurumu[id]) {
@@ -601,12 +619,12 @@ app.post('/webhook', async (req, res) => {
           continue;
         }
 
-        // Daha önce işlendiyse atla (Meta aynı event'i birden fazla gönderebilir)
-        if (islenmisYorumlar.has(yorum.id)) {
+        // Daha önce işlendiyse atla — Turso DB'de kontrol et
+        const yeni = await yorumIslendi(yorum.id);
+        if (!yeni) {
           console.log('Tekrar eden yorum, atlandi:', yorum.id);
           continue;
         }
-        islenmisYorumlar.add(yorum.id);
 
         console.log('YORUM ALINDI:', yorum.id, '| metin:', yorum.text);
 
