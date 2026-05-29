@@ -15,7 +15,6 @@ const TURSO_URL          = process.env.TURSO_URL;
 const TURSO_TOKEN        = process.env.TURSO_TOKEN;
 
 // ─── TURSO KURULUM ─────────────────────────────────────────────────────────────
-// npm install @libsql/client
 const db = createClient({ url: TURSO_URL, authToken: TURSO_TOKEN });
 
 async function dbInit() {
@@ -44,7 +43,6 @@ async function dbKullaniciAl(id) {
   }
   const row = r.rows[0];
   const sonMesaj = Number(row.son_mesaj) || 0;
-  // 1 gunden fazla sessizlik → sifirla
   if ((simdi - sonMesaj) > BIR_GUN_SANIYE && row.gorsel_gitti) {
     return { gorselGitti: false, kartUyariGitti: false, konusmalar: [] };
   }
@@ -72,7 +70,6 @@ async function dbKaydet(id, data) {
   });
 }
 
-// 30 günden eski kayıtları temizle
 async function eskiKayitlariTemizle() {
   const sinir = Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
   await db.execute({ sql: 'DELETE FROM kullanicilar WHERE guncelleme < ?', args: [sinir] });
@@ -80,7 +77,7 @@ async function eskiKayitlariTemizle() {
 setInterval(eskiKayitlariTemizle, 24 * 60 * 60 * 1000);
 
 // ─── RAM: Sadece geçici işlem state'i ─────────────────────────────────────────
-const islemDurumu = {}; // { [id]: { mesgulMu, bekleyenler, timer } }
+const islemDurumu = {};
 
 function islemDurumuAl(id) {
   if (!islemDurumu[id]) {
@@ -135,7 +132,6 @@ function siparisiParsEt(metin) {
   return null;
 }
 
-// Boş/anlamsız mesaj kontrolü — Claude'a gönderme, maliyet düşür
 function anlamsizMi(txt) {
   const t = txt.trim();
   if (!t) return true;
@@ -148,7 +144,6 @@ function bekle(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-// ─── API ÇAĞRILARI ─────────────────────────────────────────────────────────────
 // ─── ŞEHİR TESPİTİ & RİSK ────────────────────────────────────────────────────
 const SEHIR_MAP = {
   'eskişehir': 'eskisehir', 'istanbul': 'istanbul', 'ankara': 'ankara',
@@ -240,10 +235,13 @@ async function telegramGonder(siparis) {
   }
 }
 
+// ─── API ÇAĞRILARI ─────────────────────────────────────────────────────────────
+// FIX: v21.0 → v25.0 (tüm endpoint'lerde)
+
 async function igMesaj(id, metin) {
   try {
     await axios.post(
-      'https://graph.instagram.com/v21.0/me/messages',
+      'https://graph.instagram.com/v25.0/me/messages',
       { recipient: { id }, message: { text: metin } },
       { headers: { Authorization: `Bearer ${IG_ACCESS_TOKEN}`, 'Content-Type': 'application/json' } }
     );
@@ -253,11 +251,32 @@ async function igMesaj(id, metin) {
 async function igGorsel(id, url) {
   try {
     await axios.post(
-      'https://graph.instagram.com/v21.0/me/messages',
+      'https://graph.instagram.com/v25.0/me/messages',
       { recipient: { id }, message: { attachment: { type: 'image', payload: { url, is_reusable: true } } } },
       { headers: { Authorization: `Bearer ${IG_ACCESS_TOKEN}`, 'Content-Type': 'application/json' } }
     );
   } catch (e) { console.error('img err:', e.message); }
+}
+
+async function yorumuBegen(yorumId) {
+  try {
+    await axios.post(
+      'https://graph.instagram.com/v25.0/' + yorumId + '/likes',
+      {},
+      { headers: { Authorization: 'Bearer ' + IG_ACCESS_TOKEN, 'Content-Type': 'application/json' } }
+    );
+  } catch (e) { console.error('Yorum begen err:', e.message); }
+}
+
+async function yorumuCevapla(yorumId, metin) {
+  try {
+    await axios.post(
+      'https://graph.instagram.com/v25.0/' + yorumId + '/replies',
+      { message: metin },
+      { headers: { Authorization: 'Bearer ' + IG_ACCESS_TOKEN, 'Content-Type': 'application/json' } }
+    );
+    console.log('Yorum cevaplandi:', yorumId);
+  } catch (e) { console.error('Yorum cevapla err:', e.message); }
 }
 
 async function claude(mesajlar) {
@@ -266,7 +285,7 @@ async function claude(mesajlar) {
       'https://api.anthropic.com/v1/messages',
       {
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 400, // 600'den düşürdük — kısa cevap yeter
+        max_tokens: 400,
         system: PROMPT,
         messages: mesajlar,
       },
@@ -289,17 +308,13 @@ async function claude(mesajlar) {
 async function isle(id) {
   const durum = islemDurumuAl(id);
 
-  // Race condition koruması: zaten işlemdeyse çıkıyoruz,
-  // isle() zaten biterken kuyruğu kontrol ediyor (aşağıda).
   if (durum.mesgulMu) return;
   if (durum.bekleyenler.length === 0) return;
 
   durum.mesgulMu = true;
 
-  // Tüm bekleyenleri al, kuyruğu temizle
   const mesajlar = durum.bekleyenler.splice(0);
 
-  // Tekrar ve boşlukları temizle
   const benzersiz = [];
   let onceki = '';
   for (const m of mesajlar) {
@@ -313,11 +328,8 @@ async function isle(id) {
     return;
   }
 
-  // DB'den kullanıcı verisi
   const veri = await dbKullaniciAl(id);
-  const ilkMi = veri.konusmalar.length === 0;
 
-  // ── Vitrin: sadece ilk mesajda, sadece 1 kez ──
   if (!veri.gorselGitti) {
     veri.gorselGitti = true;
     await igMesaj(id, VITRIN_METNI);
@@ -325,7 +337,6 @@ async function isle(id) {
       await igGorsel(id, url);
       await bekle(600);
     }
-    // Sadece selamlama ise burada dur
     const selamlamaMi = /^(merhaba|selam|iyi g.nl.r|g.nayd.n|iyi ak.amlar|hey|sa|slm|mrb)[\s!.]*$/i.test(birlesik.trim());
     veri.konusmalar.push({ role: 'user', content: birlesik });
     veri.konusmalar.push({ role: 'assistant', content: VITRIN_METNI });
@@ -335,10 +346,8 @@ async function isle(id) {
       if (durum.bekleyenler.length > 0) await isle(id);
       return;
     }
-    // Soru varsa Claude da cevap versin — devam et
   }
 
-  // ── Kart uyarısı: sadece 1 kez ──
   if (kartVar(birlesik) && !veri.kartUyariGitti) {
     veri.kartUyariGitti = true;
     veri.konusmalar.push({ role: 'user', content: birlesik });
@@ -351,10 +360,8 @@ async function isle(id) {
     return;
   }
 
-  // ── Claude'a gönder ──
   veri.konusmalar.push({ role: 'user', content: birlesik });
 
-  // Maliyet optimizasyonu: son 10 mesaj (20 yerine)
   if (veri.konusmalar.length > 10) {
     veri.konusmalar = veri.konusmalar.slice(-10);
   }
@@ -369,11 +376,9 @@ async function isle(id) {
   veri.konusmalar.push({ role: 'assistant', content: temiz });
   dbKaydet(id, veri);
 
-  // Sipariş varsa Telegram'a gönder
   const siparis = siparisiParsEt(yanit);
   if (siparis && siparis.ad_soyad) await telegramGonder(siparis);
 
-  // Yanıtı gönder
   if (yanit.includes('###VITRIN_GOSTER###')) {
     await igMesaj(id, VITRIN_METNI);
   } else if (temiz) {
@@ -382,11 +387,10 @@ async function isle(id) {
 
   durum.mesgulMu = false;
 
-  // Kuyrukta bekleyen varsa devam et
   if (durum.bekleyenler.length > 0) await isle(id);
 }
 
-// ─── PROMPT (YENİDEN YAZILDI) ─────────────────────────────────────────────────
+// ─── PROMPT ───────────────────────────────────────────────────────────────────
 const PROMPT = `Sen bir forma mağazasının satış temsilcisisin. Instagram DM. DAIMA Türkçe yanıt ver.
 
 === KİMLİK VE KESİN KURALLAR ===
@@ -562,26 +566,6 @@ function rastgeleVaryasyon() {
   return YORUM_VARYASYONLAR[Math.floor(Math.random() * YORUM_VARYASYONLAR.length)];
 }
 
-async function yorumuBegen(yorumId) {
-  try {
-    await axios.post(
-      'https://graph.instagram.com/v21.0/' + yorumId + '/likes',
-      {},
-      { headers: { Authorization: 'Bearer ' + IG_ACCESS_TOKEN, 'Content-Type': 'application/json' } }
-    );
-  } catch (e) { console.error('Yorum begen err:', e.message); }
-}
-
-async function yorumuCevapla(yorumId, metin) {
-  try {
-    await axios.post(
-      'https://graph.instagram.com/v21.0/' + yorumId + '/replies',
-      { message: metin },
-      { headers: { Authorization: 'Bearer ' + IG_ACCESS_TOKEN, 'Content-Type': 'application/json' } }
-    );
-  } catch (e) { console.error('Yorum cevapla err:', e.message); }
-}
-
 app.get('/webhook', (req, res) => {
   if (
     req.query['hub.mode'] === 'subscribe' &&
@@ -594,28 +578,45 @@ app.get('/webhook', (req, res) => {
 });
 
 app.post('/webhook', async (req, res) => {
-  res.status(200).send('OK'); // IG 200 bekliyor, hemen yanıtla
+  // Meta 200 bekliyor, hemen yanıtla
+  res.status(200).send('OK');
 
   try {
     const body = req.body;
-    if (body.object !== 'instagram') return;
+
+    // DEBUG: Gelen her isteği logla
+    console.log('WEBHOOK GELDI | object:', body.object, '| entry sayisi:', (body.entry || []).length);
+
+    // FIX: 'page' object type'ını da kabul et (FB Page bağlantılı IG hesapları)
+    if (body.object !== 'instagram' && body.object !== 'page') return;
 
     for (const entry of body.entry) {
 
-      // YORUM OTOMASYONU
+      // ── YORUM OTOMASYONU ──
       for (const change of (entry.changes || [])) {
+        console.log('CHANGE FIELD:', change.field, '| value:', JSON.stringify(change.value).slice(0, 100));
+
         if (change.field !== 'comments') continue;
         const yorum = change.value;
-        if (!yorum || !yorum.id || yorum.from_id === yorum.media_owner_id) continue;
-        
-        // Yorumu begen
+        if (!yorum || !yorum.id) continue;
+
+        // Kendi yorumlarını atla
+        if (yorum.from_id && yorum.media_owner_id && yorum.from_id === yorum.media_owner_id) {
+          console.log('Kendi yorumu, atlandi');
+          continue;
+        }
+
+        console.log('YORUM ALINDI:', yorum.id, '| metin:', yorum.text);
+
+        // Yorumu beğen
         await yorumuBegen(yorum.id);
-        
-        // Rastgele varyasyon ile cevapla
+
+        // 1 saniye bekle, sonra cevapla
         await bekle(1000);
         await yorumuCevapla(yorum.id, rastgeleVaryasyon());
       }
 
+      // ── DM OTOMASYONU ──
       for (const event of (entry.messaging || [])) {
         const sid = event.sender?.id;
         const txt = event.message?.text;
@@ -625,14 +626,12 @@ app.post('/webhook', async (req, res) => {
 
         const durum = islemDurumuAl(sid);
 
-        // Aynı mesaj tekrar geldiyse atla (IG bazen tekrar gönderiyor)
         const temizTxt = txt.trim().toLowerCase();
         const sonBekleyen = durum.bekleyenler[durum.bekleyenler.length - 1];
         if (sonBekleyen && sonBekleyen.trim().toLowerCase() === temizTxt) continue;
 
         durum.bekleyenler.push(txt);
 
-        // Debounce: 3 saniye içinde gelen mesajları birleştir
         if (durum.timer) clearTimeout(durum.timer);
         durum.timer = setTimeout(async () => {
           durum.timer = null;
@@ -641,7 +640,7 @@ app.post('/webhook', async (req, res) => {
       }
     }
   } catch (e) {
-    console.error('Webhook err:', e.message);
+    console.error('Webhook err:', e.message, e.stack);
   }
 });
 
