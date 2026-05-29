@@ -55,7 +55,7 @@ async function yorumIslendi(yorumId) {
   }
 }
 
-const BIR_GUN_SANIYE = 24 * 60 * 60;
+const BIR_GUN_SANIYE = 45 * 60; // 45 dakika
 
 async function dbKullaniciAl(id) {
   const r = await db.execute({ sql: 'SELECT * FROM kullanicilar WHERE id = ?', args: [id] });
