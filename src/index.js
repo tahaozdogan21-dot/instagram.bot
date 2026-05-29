@@ -263,16 +263,6 @@ async function igGorsel(id, url) {
   } catch (e) { console.error('img err:', e.message); }
 }
 
-async function yorumuBegen(yorumId) {
-  try {
-    await axios.post(
-      'https://graph.instagram.com/v25.0/' + yorumId + '/likes',
-      {},
-      { headers: { Authorization: 'Bearer ' + IG_ACCESS_TOKEN, 'Content-Type': 'application/json' } }
-    );
-  } catch (e) { console.error('Yorum begen err:', e.message); }
-}
-
 async function yorumuCevapla(yorumId, metin) {
   try {
     await axios.post(
@@ -611,12 +601,16 @@ app.post('/webhook', async (req, res) => {
           continue;
         }
 
+        // Daha önce işlendiyse atla (Meta aynı event'i birden fazla gönderebilir)
+        if (islenmisYorumlar.has(yorum.id)) {
+          console.log('Tekrar eden yorum, atlandi:', yorum.id);
+          continue;
+        }
+        islenmisYorumlar.add(yorum.id);
+
         console.log('YORUM ALINDI:', yorum.id, '| metin:', yorum.text);
 
-        // Yorumu beğen
-        await yorumuBegen(yorum.id);
-
-        // 1 saniye bekle, sonra cevapla
+        // 1 saniye bekle, cevapla (beğeni kaldırıldı)
         await bekle(1000);
         await yorumuCevapla(yorum.id, rastgeleVaryasyon());
       }
