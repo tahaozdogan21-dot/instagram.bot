@@ -575,6 +575,21 @@ const YORUM_VARYASYONLAR = [
   'Merhaba efendim, en hızlı şekilde yardımcı olabilmemiz için bize özelden yazmanızı bekliyoruz 🙏🏻',
 ];
 
+// ─── BOT'UN KENDİ IG ID'Sİ — başlangıçta çek ────────────────────────────────
+let BOT_IG_ID = '';
+async function botIdAl() {
+  try {
+    const r = await axios.get('https://graph.instagram.com/v25.0/me?fields=id', {
+      headers: { Authorization: 'Bearer ' + IG_ACCESS_TOKEN }
+    });
+    BOT_IG_ID = r.data.id;
+    console.log('Bot IG ID:', BOT_IG_ID);
+  } catch(e) {
+    console.error('Bot ID alinamadi:', e.message);
+  }
+}
+botIdAl();
+
 function rastgeleVaryasyon() {
   return YORUM_VARYASYONLAR[Math.floor(Math.random() * YORUM_VARYASYONLAR.length)];
 }
@@ -613,9 +628,9 @@ app.post('/webhook', async (req, res) => {
         const yorum = change.value;
         if (!yorum || !yorum.id) continue;
 
-        // Kendi yorumlarını atla
-        if (yorum.from_id && yorum.media_owner_id && yorum.from_id === yorum.media_owner_id) {
-          console.log('Kendi yorumu, atlandi');
+        // Sadece ana yorumlara cevap ver, reply'ları atla
+        if (yorum.parent_id) {
+          console.log('Reply yorumu, atlandi:', yorum.id);
           continue;
         }
 
