@@ -670,6 +670,8 @@ function rastgeleVaryasyon() {
   return YORUM_VARYASYONLAR[Math.floor(Math.random() * YORUM_VARYASYONLAR.length)];
 }
 
+app.get('/', (req, res) => res.status(200).send('OK'));
+
 app.get('/webhook', (req, res) => {
   if (
     req.query['hub.mode'] === 'subscribe' &&
