@@ -79,6 +79,11 @@ setInterval(eskiKayitlariTemizle, 24 * 60 * 60 * 1000);
 // ─── RAM: Sadece geçici işlem state'i ─────────────────────────────────────────
 const islemDurumu = {};
 
+// İşlenmiş yorum ID'leri — aynı yoruma 2 kez cevap vermeyi önler
+const islenmisYorumlar = new Set();
+// Set çok büyümesin diye 1 saatte bir temizle
+setInterval(() => islenmisYorumlar.clear(), 60 * 60 * 1000);
+
 function islemDurumuAl(id) {
   if (!islemDurumu[id]) {
     islemDurumu[id] = { mesgulMu: false, bekleyenler: [], timer: null };
