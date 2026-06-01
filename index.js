@@ -1,5 +1,6 @@
 const express = require('express');
 const axios = require('axios');
+const crypto = require('crypto');
 const { createClient } = require('@libsql/client');
 const app = express();
 
@@ -13,6 +14,8 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID   = process.env.TELEGRAM_CHAT_ID;
 const TURSO_URL          = process.env.TURSO_URL;
 const TURSO_TOKEN        = process.env.TURSO_TOKEN;
+const META_CAPI_TOKEN    = process.env.META_CAPI_TOKEN;
+const META_PIXEL_ID      = process.env.META_PIXEL_ID || '2045840229330985';
 
 // ─── TURSO KURULUM ─────────────────────────────────────────────────────────────
 const db = createClient({ url: TURSO_URL, authToken: TURSO_TOKEN });
@@ -350,6 +353,52 @@ async function telegramGonder(siparis) {
   }
 }
 
+// ─── META CONVERSIONS API ─────────────────────────────────────────────────────
+async function capiGonder(siparis, igUserId) {
+  try {
+    if (!META_CAPI_TOKEN || !META_PIXEL_ID) return;
+
+    const simdi = Math.floor(Date.now() / 1000);
+
+    // Telefon numarasını normalize et ve SHA-256 ile hashle
+    let telefon = (siparis.telefon || '').replace(/\D/g, '');
+    if (telefon.startsWith('90')) telefon = telefon.slice(2);
+    if (telefon.startsWith('0')) telefon = telefon.slice(1);
+    const telefonHash = crypto.createHash('sha256').update(telefon).digest('hex');
+
+    const payload = {
+      data: [{
+        event_name: 'Purchase',
+        event_time: simdi,
+        action_source: 'other',
+        user_data: {
+          ph: [telefonHash],
+          external_id: igUserId ? [crypto.createHash('sha256').update(igUserId).digest('hex')] : undefined,
+        },
+        custom_data: {
+          currency: 'TRY',
+          value: parseFloat((siparis.toplam || '0').toString().replace(/[^0-9.]/g, '')) || 0,
+          content_name: siparis.urun || '',
+          content_type: 'product',
+          num_items: parseInt(siparis.adet) || 1,
+        },
+      }],
+    };
+
+    await axios.post(
+      `https://graph.facebook.com/v20.0/${META_PIXEL_ID}/events`,
+      payload,
+      {
+        headers: { 'Content-Type': 'application/json' },
+        params: { access_token: META_CAPI_TOKEN },
+      }
+    );
+    console.log('CAPI Purchase eventi gonderildi');
+  } catch (e) {
+    console.error('CAPI err:', e.message);
+  }
+}
+
 // ─── API ÇAĞRILARI ─────────────────────────────────────────────────────────────
 // FIX: v21.0 → v25.0 (tüm endpoint'lerde)
 
@@ -511,6 +560,7 @@ async function isle(id) {
   const siparis = siparisiParsEt(yanit);
   if (siparis && siparis.ad_soyad) {
     await telegramGonder(siparis);
+    await capiGonder(siparis, id);
     // Sipariş tamamlandı, işaretle ve takip timer'ını iptal et
     veri.siparisVerildi = true;
     veri.siparisTarihi = Math.floor(Date.now() / 1000);
@@ -875,6 +925,9 @@ app.post('/webhook', async (req, res) => {
             durum.takipTimer = null;
             const veriKontrol = await dbKullaniciAl(sid);
             if (veriKontrol.siparisVerildi) return; // Sipariş verilmişse takip mesajı gönderme
+            // Sadece 3'ten fazla mesaj attıysa takip mesajı gönder
+            const mesajSayisi = veriKontrol.konusmalar.filter(m => m.role === 'user').length;
+            if (mesajSayisi <= 3) return;
             const gonder = await takipMesajiGonderilsinMi(sid);
             if (gonder) {
               await igMesaj(sid, 'Aklınıza takılan bir soru var mı, yardımcı olabilir miyim?');
