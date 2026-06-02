@@ -299,7 +299,7 @@ function riskHesapla(siparis) {
   return { riskEmoji: '🟢', riskTR: 'NORMAL', riskAciklama: 'Standart konut adresi' };
 }
 
-async function telegramGonder(siparis) {
+async function telegramGonder(siparis, deneme = 0) {
   try {
     if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
 
@@ -348,8 +348,14 @@ async function telegramGonder(siparis) {
       text: msg,
       disable_web_page_preview: true,
     });
+    console.log('Telegram gönderildi ✓');
   } catch (e) {
     console.error('Telegram err:', e.message);
+    if (deneme < 2) {
+      await bekle(3000);
+      return telegramGonder(siparis, deneme + 1);
+    }
+    console.error('Telegram 3 denemede de başarısız oldu!');
   }
 }
 
@@ -439,7 +445,7 @@ async function claude(mesajlar) {
       'https://api.anthropic.com/v1/messages',
       {
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 400,
+        max_tokens: 1000,
         system: PROMPT,
         messages: mesajlar,
       },
