@@ -1,6 +1,5 @@
 const express = require('express');
 const axios = require('axios');
-const crypto = require('crypto');
 const { createClient } = require('@libsql/client');
 const app = express();
 
@@ -14,8 +13,6 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID   = process.env.TELEGRAM_CHAT_ID;
 const TURSO_URL          = process.env.TURSO_URL;
 const TURSO_TOKEN        = process.env.TURSO_TOKEN;
-const META_CAPI_TOKEN    = process.env.META_CAPI_TOKEN;
-const META_PIXEL_ID      = process.env.META_PIXEL_ID || '2045840229330985';
 
 // ─── TURSO KURULUM ─────────────────────────────────────────────────────────────
 const db = createClient({ url: TURSO_URL, authToken: TURSO_TOKEN });
@@ -47,6 +44,14 @@ async function dbInit() {
   try { await db.execute('ALTER TABLE kullanicilar ADD COLUMN son_mesaj INTEGER DEFAULT 0'); } catch(e) {}
   try { await db.execute('ALTER TABLE kullanicilar ADD COLUMN siparis_verildi INTEGER DEFAULT 0'); } catch(e) {}
   try { await db.execute('ALTER TABLE kullanicilar ADD COLUMN siparis_tarihi INTEGER DEFAULT 0'); } catch(e) {}
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS bekleyen_siparisler (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      siparis_json TEXT NOT NULL,
+      deneme INTEGER DEFAULT 0,
+      tarih INTEGER DEFAULT (unixepoch())
+    )
+  `);
 }
 dbInit().catch(e => console.error('DB init err:', e.message));
 
@@ -205,14 +210,20 @@ const FORMA_GORSELLERI = {
   '0023': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891832/BJK_BEYAZ_RETRO_vtectc.jpg',
   '0024': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891833/BJK_BEYAZ_RETRO_iybbwa.jpg',
   '0025': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891832/BJK_BEYAZ_RETRO_oaxlkt.jpg',
+  '0026': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1780840047/0026_yhyahd.png',
+  '0027': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1780840056/0027_l6ofmb.png',
+  '0028': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1780840052/0028_blj8dc.png',
 };
 
 const URUN_KODLARI = {
-  '0021': 'FB RETRO CUBUKLU FORMASI',
+  '0021': 'FB RETRO ÇUBUKLU FORMASI',
   '0022': 'FB RETRO SARI FORMASI',
-  '0023': 'FB GRI TASARIM FORMASI',
+  '0023': 'FB GRİ TASARIM FORMASI',
   '0024': 'FB PALAMUT SARI FORMASI',
-  '0025': 'FB PALAMUT LACIVERT FORMASI',
+  '0025': 'FB PALAMUT LACİVERT FORMASI',
+  '0026': 'FB YENİ SEZON LACİVERT FORMASI',
+  '0027': 'FB YENİ SEZON ÇUBUKLU FORMASI',
+  '0028': 'FB YENİ SEZON SARI FORMASI',
 };
 
 const TUM_GORSELLER = Object.values(FORMA_GORSELLERI);
@@ -299,111 +310,99 @@ function riskHesapla(siparis) {
   return { riskEmoji: '🟢', riskTR: 'NORMAL', riskAciklama: 'Standart konut adresi' };
 }
 
-async function telegramGonder(siparis, deneme = 0) {
-  try {
-    if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
+function telegramMesajOlustur(siparis) {
+  const urun = kodaIsimCevir(siparis.urun.toUpperCase());
+  const telefon = (siparis.telefon || '').replace(/\s/g, '');
+  let telefonRakam = telefon.replace(/\D/g, '');
+  if (telefonRakam.startsWith('90')) telefonRakam = telefonRakam.slice(2);
+  if (telefonRakam.startsWith('0')) telefonRakam = telefonRakam.slice(1);
+  const telefonUyari = telefonRakam.length !== 10 ? ' ⚠️EKSİK' : '';
+  const { bina, sehir } = adresParcala(siparis.adres || '');
+  const { riskEmoji, riskTR, riskAciklama } = riskHesapla(siparis);
+  const baroLink = 'https://www.barobirlik.org.tr/AvukatArama/?q=' + encodeURIComponent(siparis.ad_soyad);
+  const googleTel = 'https://www.google.com/search?q=' + encodeURIComponent('"' + telefon + '"');
+  const googleIsimSadece = 'https://www.google.com/search?q=' + encodeURIComponent('"' + siparis.ad_soyad + '"');
+  const googleIsimSehir = 'https://www.google.com/search?q=' + encodeURIComponent('"' + siparis.ad_soyad + '" ' + sehir.isim + ' avukat hukuk');
+  const googleAdres = 'https://www.google.com/search?q=' + encodeURIComponent('"' + (bina || siparis.adres) + '" avukat hukuk');
+  return '📦 YENİ SİPARİŞ!\n\n' +
+    'AD: ' + siparis.ad_soyad.toUpperCase() + '\n' +
+    'TEL: ' + siparis.telefon + telefonUyari + '\n' +
+    'ADRES: ' + siparis.adres.toUpperCase() + '\n' +
+    'ÜRÜN: ' + urun + '\n' +
+    'TOPLAM: ' + siparis.toplam + ' TL\n' +
+    'TOPLAM ADET: ' + (siparis.adet || '-') + '\n\n' +
+    '━━━━━━━━━━━━━━━━━━━━━\n' +
+    riskEmoji + ' ' + riskTR + ' — ' + riskAciklama + '\n' +
+    '━━━━━━━━━━━━━━━━━━━━━\n' +
+    '🔗 SORGULA\n' +
+    '━━━━━━━━━━━━━━━━━━━━━\n' +
+    '📱 ' + googleTel + '\n' +
+    '──────────────────\n' +
+    '👤 ' + googleIsimSadece + '\n' +
+    '──────────────────\n' +
+    '👤 ' + googleIsimSehir + '\n' +
+    '──────────────────\n' +
+    '⚖️ ' + baroLink + '\n' +
+    '──────────────────\n' +
+    '🏢 ' + googleAdres;
+}
 
-    const urun = kodaIsimCevir(siparis.urun.toUpperCase());
-    const telefon = (siparis.telefon || '').replace(/\s/g, '');
-    // Türkiye numarası doğrulama — tüm varyasyonları destekle
-    // 5055671411 / 05055671411 / +905055671411 / 0 505 567 14 11 vb.
-    let telefonRakam = telefon.replace(/\D/g, ''); // sadece rakamlar
-    if (telefonRakam.startsWith('90')) telefonRakam = telefonRakam.slice(2); // +90 veya 90 temizle
-    if (telefonRakam.startsWith('0')) telefonRakam = telefonRakam.slice(1);  // baştaki 0 temizle
-    const telefonUyari = telefonRakam.length !== 10 ? ' ⚠️EKSİK' : '';
-    const { bina, sehir } = adresParcala(siparis.adres || '');
-    const { riskEmoji, riskTR, riskAciklama } = riskHesapla(siparis);
-
-    const baroLink = 'https://www.barobirlik.org.tr/AvukatArama/?q=' + encodeURIComponent(siparis.ad_soyad);
-    const googleTel = 'https://www.google.com/search?q=' + encodeURIComponent('"' + telefon + '"');
-    const googleIsimSadece = 'https://www.google.com/search?q=' + encodeURIComponent('"' + siparis.ad_soyad + '"');
-    const googleIsimSehir = 'https://www.google.com/search?q=' + encodeURIComponent('"' + siparis.ad_soyad + '" ' + sehir.isim + ' avukat hukuk');
-    const googleAdres = 'https://www.google.com/search?q=' + encodeURIComponent('"' + (bina || siparis.adres) + '" avukat hukuk');
-
-    const msg =
-      '📦 YENİ SİPARİŞ!\n\n' +
-      'AD: ' + siparis.ad_soyad.toUpperCase() + '\n' +
-      'TEL: ' + siparis.telefon + telefonUyari + '\n' +
-      'ADRES: ' + siparis.adres.toUpperCase() + '\n' +
-      'ÜRÜN: ' + urun + '\n' +
-      'TOPLAM: ' + siparis.toplam + ' TL\n' +
-      'TOPLAM ADET: ' + (siparis.adet || '-') + '\n\n' +
-      '━━━━━━━━━━━━━━━━━━━━━\n' +
-      riskEmoji + ' ' + riskTR + ' — ' + riskAciklama + '\n' +
-      '━━━━━━━━━━━━━━━━━━━━━\n' +
-      '🔗 SORGULA\n' +
-      '━━━━━━━━━━━━━━━━━━━━━\n' +
-      '📱 ' + googleTel + '\n' +
-      '──────────────────\n' +
-      '👤 ' + googleIsimSadece + '\n' +
-      '──────────────────\n' +
-      '👤 ' + googleIsimSehir + '\n' +
-      '──────────────────\n' +
-      '⚖️ ' + baroLink + '\n' +
-      '──────────────────\n' +
-      '🏢 ' + googleAdres;
-
-    await axios.post('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
-      chat_id: TELEGRAM_CHAT_ID,
-      text: msg,
-      disable_web_page_preview: true,
-    });
-    console.log('Telegram gönderildi ✓');
-  } catch (e) {
-    console.error('Telegram err:', e.message);
-    if (deneme < 2) {
-      await bekle(3000);
-      return telegramGonder(siparis, deneme + 1);
+async function telegramGonder(siparis) {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return true;
+  const msg = telegramMesajOlustur(siparis);
+  for (let deneme = 0; deneme < 3; deneme++) {
+    try {
+      await axios.post('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
+        chat_id: TELEGRAM_CHAT_ID,
+        text: msg,
+        disable_web_page_preview: true,
+      });
+      console.log('Telegram gönderildi ✓');
+      return true;
+    } catch (e) {
+      console.error('Telegram err (deneme ' + (deneme+1) + '):', e.message);
+      if (deneme < 2) await bekle(3000);
     }
-    console.error('Telegram 3 denemede de başarısız oldu!');
   }
-}
-
-// ─── META CONVERSIONS API ─────────────────────────────────────────────────────
-async function capiGonder(siparis, igUserId) {
+  // 3 denemede başarısız — DB'ye kaydet
   try {
-    if (!META_CAPI_TOKEN || !META_PIXEL_ID) return;
+    await db.execute({
+      sql: 'INSERT INTO bekleyen_siparisler (siparis_json) VALUES (?)',
+      args: [JSON.stringify(siparis)],
+    });
+    console.error('⚠️ Sipariş DB yedekle kaydedildi, retry bekliyor.');
+  } catch (dbErr) {
+    console.error('DB yedek kayıt hatası:', dbErr.message);
+  }
+  return false;
+}
 
-    const simdi = Math.floor(Date.now() / 1000);
-
-    // Telefon numarasını normalize et ve SHA-256 ile hashle
-    let telefon = (siparis.telefon || '').replace(/\D/g, '');
-    if (telefon.startsWith('90')) telefon = telefon.slice(2);
-    if (telefon.startsWith('0')) telefon = telefon.slice(1);
-    const telefonHash = crypto.createHash('sha256').update(telefon).digest('hex');
-
-    const payload = {
-      data: [{
-        event_name: 'Purchase',
-        event_time: simdi,
-        action_source: 'other',
-        user_data: {
-          ph: [telefonHash],
-          external_id: igUserId ? [crypto.createHash('sha256').update(igUserId).digest('hex')] : undefined,
-        },
-        custom_data: {
-          currency: 'TRY',
-          value: parseFloat((siparis.toplam || '0').toString().replace(/[^0-9.]/g, '')) || 0,
-          content_name: siparis.urun || '',
-          content_type: 'product',
-          num_items: parseInt(siparis.adet) || 1,
-        },
-      }],
-    };
-
-    await axios.post(
-      `https://graph.facebook.com/v20.0/${META_PIXEL_ID}/events`,
-      payload,
-      {
-        headers: { 'Content-Type': 'application/json' },
-        params: { access_token: META_CAPI_TOKEN },
+// Her 2 dakikada bir bekleyen siparişleri dene
+async function bekleyenSiparisleriGonder() {
+  try {
+    const r = await db.execute('SELECT * FROM bekleyen_siparisler ORDER BY tarih ASC LIMIT 10');
+    for (const row of r.rows) {
+      const siparis = JSON.parse(row.siparis_json);
+      const msg = telegramMesajOlustur(siparis);
+      try {
+        await axios.post('https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN + '/sendMessage', {
+          chat_id: TELEGRAM_CHAT_ID,
+          text: '🔄 BEKLEYEN SİPARİŞ (Yeniden):\n' + msg,
+          disable_web_page_preview: true,
+        });
+        await db.execute({ sql: 'DELETE FROM bekleyen_siparisler WHERE id = ?', args: [row.id] });
+        console.log('Bekleyen sipariş gönderildi, ID:', row.id);
+        await bekle(1000);
+      } catch (e) {
+        console.error('Bekleyen sipariş gönderilemedi, ID:', row.id, e.message);
       }
-    );
-    console.log('CAPI Purchase eventi gonderildi');
+    }
   } catch (e) {
-    console.error('CAPI err:', e.message);
+    console.error('bekleyenSiparisleriGonder err:', e.message);
   }
 }
+setInterval(bekleyenSiparisleriGonder, 2 * 60 * 1000);
+
 
 // ─── API ÇAĞRILARI ─────────────────────────────────────────────────────────────
 // FIX: v21.0 → v25.0 (tüm endpoint'lerde)
@@ -473,119 +472,122 @@ async function isle(id) {
 
   durum.mesgulMu = true;
 
-  const mesajlar = durum.bekleyenler.splice(0);
+  try {
+    const mesajlar = durum.bekleyenler.splice(0);
 
-  const benzersiz = [];
-  let onceki = '';
-  for (const m of mesajlar) {
-    const t = m.trim().toLowerCase();
-    if (t !== onceki) { benzersiz.push(m); onceki = t; }
-  }
-  const birlesik = benzersiz.join(' ').trim();
-
-  if (!birlesik || anlamsizMi(birlesik)) {
-    durum.mesgulMu = false;
-    return;
-  }
-
-  const veri = await dbKullaniciAl(id);
-
-  let vitrinBuTurGitti = false;
-  if (!veri.gorselGitti) {
-    veri.gorselGitti = true;
-    vitrinBuTurGitti = true;
-    await igMesaj(id, VITRIN_METNI);
-    for (const url of TUM_GORSELLER) {
-      await igGorsel(id, url);
-      await bekle(600);
+    const benzersiz = [];
+    let onceki = '';
+    for (const m of mesajlar) {
+      const t = m.trim().toLowerCase();
+      if (t !== onceki) { benzersiz.push(m); onceki = t; }
     }
-    const selamlamaMi = /^(merhaba|selam|iyi g.nl.r|g.nayd.n|iyi ak.amlar|hey|sa|slm|mrb)[\s!.]*$/i.test(birlesik.trim());
+    const birlesik = benzersiz.join(' ').trim();
+
+    if (!birlesik || anlamsizMi(birlesik)) return;
+
+    const veri = await dbKullaniciAl(id);
+
+    let vitrinBuTurGitti = false;
+    if (!veri.gorselGitti) {
+      veri.gorselGitti = true;
+      vitrinBuTurGitti = true;
+      await igMesaj(id, VITRIN_METNI);
+      for (const url of TUM_GORSELLER) {
+        await igGorsel(id, url);
+        await bekle(600);
+      }
+      const selamlamaMi = /^(merhaba|selam|iyi g.nl.r|g.nayd.n|iyi ak.amlar|hey|sa|slm|mrb)[\s!.]*$/i.test(birlesik.trim());
+      veri.konusmalar.push({ role: 'user', content: birlesik });
+      veri.konusmalar.push({ role: 'assistant', content: VITRIN_METNI });
+      await dbKaydet(id, veri);
+      if (selamlamaMi) {
+        if (durum.bekleyenler.length > 0) isle(id);
+        return;
+      }
+    }
+
+    // Kart sorusu kontrolü
+    if (kartVar(birlesik) && !veri.kartUyariGitti) {
+      const siparisAsamasinda = veri.konusmalar.some(m =>
+        m.role === 'assistant' && (
+          m.content.includes('Onaylıyor musunuz') ||
+          m.content.includes('TOPLAM:') ||
+          m.content.includes('nakit mi') ||
+          m.content.includes('Nakit mi') ||
+          m.content.includes('kart mı') ||
+          m.content.includes('Kart mı')
+        )
+      );
+      if (!siparisAsamasinda) {
+        veri.konusmalar.push({ role: 'user', content: birlesik });
+        const kartCevap = 'Evet tabiki yapabilirsiniz efendim, kapıda kartla ödeme seçeneğimiz mevcut.';
+        veri.konusmalar.push({ role: 'assistant', content: kartCevap });
+        await dbKaydet(id, veri);
+        await igMesaj(id, kartCevap);
+        if (durum.bekleyenler.length > 0) isle(id);
+        return;
+      } else {
+        veri.kartUyariGitti = true;
+        veri.konusmalar.push({ role: 'user', content: birlesik });
+        veri.konusmalar.push({ role: 'assistant', content: KART_UYARI });
+        await dbKaydet(id, veri);
+        await igMesaj(id, KART_UYARI);
+        if (durum.bekleyenler.length > 0) isle(id);
+        return;
+      }
+    }
+
     veri.konusmalar.push({ role: 'user', content: birlesik });
-    veri.konusmalar.push({ role: 'assistant', content: VITRIN_METNI });
+
+    if (veri.konusmalar.length > 40) {
+      veri.konusmalar = veri.konusmalar.slice(-40);
+    }
+
+    const yanit = await claude(veri.konusmalar);
+
+    const temiz = yanit
+      .replace(/###SIPARIS_BASLA###[\s\S]*?###SIPARIS_BITIS###/g, '')
+      .replace(/###VITRIN_GOSTER###/g, '')
+      .trim();
+
+    veri.konusmalar.push({ role: 'assistant', content: temiz });
     await dbKaydet(id, veri);
-    if (selamlamaMi) {
-      durum.mesgulMu = false;
-      if (durum.bekleyenler.length > 0) await isle(id);
-      return;
-    }
-  }
 
-  // Kart sorusu kontrolü
-  if (kartVar(birlesik) && !veri.kartUyariGitti) {
-    const siparisAsamasinda = veri.konusmalar.some(m =>
-      m.role === 'assistant' && (
-        m.content.includes('Onaylıyor musunuz') ||
-        m.content.includes('TOPLAM:') ||
-        m.content.includes('nakit mi') ||
-        m.content.includes('Nakit mi') ||
-        m.content.includes('kart mı') ||
-        m.content.includes('Kart mı')
-      )
-    );
-    if (!siparisAsamasinda) {
-      // Sipariş öncesi kart sorusu — sadece evet de, uyarı yapma
-      // Claude'a gönder ki bağlamı bilsin
-      veri.konusmalar.push({ role: 'user', content: birlesik });
-      const kartCevap = 'Evet tabiki yapabilirsiniz efendim, kapıda kartla ödeme seçeneğimiz mevcut.';
-      veri.konusmalar.push({ role: 'assistant', content: kartCevap });
+    const siparis = siparisiParsEt(yanit);
+    if (siparis && siparis.ad_soyad) {
+      const telegramBasarili = await telegramGonder(siparis);
+      veri.siparisVerildi = true;
+      veri.siparisTarihi = Math.floor(Date.now() / 1000);
       await dbKaydet(id, veri);
-      await igMesaj(id, kartCevap);
-      durum.mesgulMu = false;
-      if (durum.bekleyenler.length > 0) await isle(id);
-      return;
-    } else {
-      // Sipariş aşamasında kart seçti — uyarıyı gönder
-      // Konuşma geçmişine de yaz ki Claude bağlamı kaybetmesin
-      veri.kartUyariGitti = true;
-      veri.konusmalar.push({ role: 'user', content: birlesik });
-      veri.konusmalar.push({ role: 'assistant', content: KART_UYARI });
-      await dbKaydet(id, veri);
-      await igMesaj(id, KART_UYARI);
-      durum.mesgulMu = false;
-      if (durum.bekleyenler.length > 0) await isle(id);
-      return;
+      if (!telegramBasarili) {
+        console.error('⚠️ Sipariş Telegram\'a gitmedi, DB\'ye yedeklendi:', siparis.ad_soyad);
+      }
+      if (durum.takipTimer) {
+        clearTimeout(durum.takipTimer);
+        durum.takipTimer = null;
+      }
     }
-  }
 
-  veri.konusmalar.push({ role: 'user', content: birlesik });
-
-  if (veri.konusmalar.length > 40) {
-    veri.konusmalar = veri.konusmalar.slice(-40);
-  }
-
-  const yanit = await claude(veri.konusmalar);
-
-  const temiz = yanit
-    .replace(/###SIPARIS_BASLA###[\s\S]*?###SIPARIS_BITIS###/g, '')
-    .replace(/###VITRIN_GOSTER###/g, '')
-    .trim();
-
-  veri.konusmalar.push({ role: 'assistant', content: temiz });
-  await dbKaydet(id, veri);
-
-  const siparis = siparisiParsEt(yanit);
-  if (siparis && siparis.ad_soyad) {
-    await telegramGonder(siparis);
-    await capiGonder(siparis, id);
-    // Sipariş tamamlandı, işaretle ve takip timer'ını iptal et
-    veri.siparisVerildi = true;
-    veri.siparisTarihi = Math.floor(Date.now() / 1000);
-    await dbKaydet(id, veri);
-    if (durum.takipTimer) {
-      clearTimeout(durum.takipTimer);
-      durum.takipTimer = null;
+    if (yanit.includes('###VITRIN_GOSTER###') && !vitrinBuTurGitti) {
+      await igMesaj(id, VITRIN_METNI);
+      if (temiz) {
+        await bekle(400);
+        await igMesaj(id, temiz);
+      }
+    } else if (temiz) {
+      await igMesaj(id, temiz);
     }
+
+    if (durum.bekleyenler.length > 0) isle(id);
+
+  } catch (e) {
+    console.error('isle() hata:', id, e.message, e.stack);
+    try {
+      await igMesaj(id, 'Şu an teknik bir sorun yaşıyoruz, birazdan tekrar yazabilirsiniz.');
+    } catch (_) {}
+  } finally {
+    durum.mesgulMu = false;
   }
-
-  if (yanit.includes('###VITRIN_GOSTER###') && !vitrinBuTurGitti) {
-    await igMesaj(id, VITRIN_METNI);
-  } else if (temiz) {
-    await igMesaj(id, temiz);
-  }
-
-  durum.mesgulMu = false;
-
-  if (durum.bekleyenler.length > 0) await isle(id);
 }
 
 // ─── PROMPT ───────────────────────────────────────────────────────────────────
@@ -643,10 +645,21 @@ Kodları asla gösterme. Daima tam adı büyük harfle yaz:
 - 0023 → FB GRİ TASARIM FORMASI
 - 0024 → FB PALAMUT SARI FORMASI
 - 0025 → FB PALAMUT LACİVERT FORMASI
+- 0026 → FB YENİ SEZON LACİVERT FORMASI
+- 0027 → FB YENİ SEZON ÇUBUKLU FORMASI
+- 0028 → FB YENİ SEZON SARI FORMASI
 Yetişkin ürünlerimizde maalesef şort bulunmamaktadır, sadece forma olarak gönderim yapılıyor. Şort sadece çocuk formalarında mevcuttur.
 
 === STOK ===
 Belirli model sorulursa: "Efendim güncel modellerimiz bu şekildedir, bunların haricinde ekstra bir modelimiz yoktur."
+
+=== YENİ SEZON ÜRÜN TESLİMAT BİLGİSİ (0026 / 0027 / 0028) ===
+Müşterinin sipariş listesinde 0026, 0027 veya 0028 kodlu ürünlerden biri varsa siparişi normal şekilde al.
+Sipariş özetini göster ve "Onaylıyor musunuz?" diye sor. "Onaylıyor musunuz?" cümlesinin hemen ardına, aynı yanıt içinde şu cümleyi ekle (müşteri daha cevap vermeden):
+"Seçtiğiniz ürün şu an üretim aşamasındadır. 15 Haziran'da üretimden çıkıp paketlenerek kargoya teslim edilecektir, ardından 2-3 iş günü içerisinde kapınızda olacaktır."
+Müşteri her ikisini de görüp onaylarsa (evet/olur/onaylıyorum) kapanış cümlesini söyle ve siparişi tamamla.
+- Sadece 1 kez söyle, tekrarlama.
+
 
 === FİYATLAR ===
 - 1 adet: 630 TL
@@ -671,7 +684,7 @@ Müşteri boy endişesi belirtirse:
 "Efendim o boy için [beden] tam olur, gönül rahatlığıyla alabilirsiniz."
 
 === EKSİK BİLGİ TAMAMLAMA ===
-Müşteri eksik bilgi verirse sadece eksik olanı sor, kendi düşünceni katma, kampanyayı tekrar açıklama:
+Müşteri eksik bilgi verirse sadece eksik olanı sor, kendi düşünceni katma:
 
 Müşteri beden söyler ama model söylemezse:
 "Hangi modellerden almak istiyorsunuz, görseller üzerinden kodunu iletebilirsiniz."
@@ -680,7 +693,7 @@ Müşteri model söyler ama beden söylemezse:
 "Bu modeller için bedenleriniz ne olacak, kilonuzu söyler misiniz?"
 
 Müşteri hem model hem beden söylerse direkt siparişe geç, tekrar sorma.
-Müşteri kaç adet alacağını zaten belirttiyse kampanyayı tekrar açıklama.
+Müşteri kaç adet alacağını zaten belirttiyse adet tekrar sorma.
 
 === KALIP KURALI (nabza göre şerbet) ===
 Asla "bu kalıp yok" veya "bu beden yok" deme. Müşterinin isteğine göre ürünü tanımla:
@@ -702,10 +715,12 @@ Başka beden önerme, alternatif sunma.
 Müşteri kalıp belirtmezse sadece kilo sor, kalıp hakkında yorum yapma.
 
 === TESLİMAT ===
-Sipariş öncesi şehir sor. Şehir verildikten sonra: "2-3 iş günü içerisinde sizde olur efendim."
-Sipariş sonrası direkt: "2-3 iş günü içerisinde sizde olur efendim."
-
+Müşteri teslim süresi sorarsa:
+- Sipariş 0026, 0027 veya 0028 içeriyorsa ya da müşteri bu ürünleri almayı düşünüyorsa: "Efendim 0026, 0027 ve 0028 kodlu yeni sezon formalarımız 15 Haziran'da kargoya verilecektir, ardından 2-3 iş günü içerisinde teslim olacaktır."
+- Diğer tüm ürünlerde: "2-3 iş günü içerisinde sizde olur efendim."
+- Müşteri ürün seçmeden sorarsa her iki bilgiyi de ver: "Mevcut ürünlerimiz 2-3 iş günü içerisinde teslim edilir. 0026, 0027 ve 0028 kodlu yeni sezon ürünlerimiz ise 15 Haziran'da kargoya verilip 2-3 iş günü içinde kapınıza ulaşır."
 === İADE ===
+
 Bu bilgiyi proaktif olarak söyleme. Sadece müşteri "yanlış gelirse", "dar olursa", "beden tutmazsa" gibi endişe belirtirse söyle:
 "Ürün sizlere ulaştıktan sonra 2 gün içerisinde bizlere ulaşırsanız sorununuzu çözüme kavuşturabiliriz efendim."
 
@@ -743,16 +758,16 @@ Müşteri ürün adını söylerse kodu ayrıca sorma. Müşteri kod yazarsa dir
 
 === SIK SORULAR ===
 - Kumaş: forma kumaşı, koku yapmaz.
-- İsim baskısı: evet yazıyoruz.
+- İsim baskısı: "Evet yazıyoruz efendim." Font sorulursa: "Fenerbahçe'nin resmi kullandığı isim fontunu kullanıyoruz. Sayıların altında Fenerbahçe logosu da yer alıyor." 
 - Çekme: çekmez.
 - Logo: nakış, sökülmez.
 - İndirim: kampanya fiyatı bu.
-- 12+ yaş çocuk: mevcut, forma + şort takım halinde geliyor. 12 yaş altı: yok. Çocuk baskı: sadece sorulursa evet. Çocuk çorap: maalesef yok.
+- Çocuk forması: 12 yaşından itibaren mevcut, forma + şort takım halinde geliyor. 12 yaş altı: yok. Çocuk baskı: sadece sorulursa evet. Çocuk çorap: maalesef yok.
 
 === ÇOCUK FORMASI SİPARİŞİ ===
 Müşteri çocuk forması isterse kilo değil yaş sor: "Çocuğunuz kaç yaşında efendim?"
 Yaşa göre sipariş al, ürün adının yanına yaşı yaz. Örnek: FB RETRO ÇUBUKLU FORMASI 12 YAŞ
-12 yaş altı için: "Maalesef 12 yaş altı için ürünümüz bulunmuyor efendim."
+12 yaş altı için: "Efendim çocuk bedenlerimiz şu an mevcut değil, 12 yaşından itibaren ürünümüz bulunuyor. Çocuk bedenlerimiz 2-3 hafta içinde gelecektir, o zaman yardımcı olabiliriz."
 Sipariş özetinde beden yerine yaş yaz: [ÜRÜN ADI] [YAŞ]
 
 === SİPARİŞ AKIŞI (sırayla takip et) ===
@@ -785,12 +800,12 @@ TOPLAM: X TL - KAPIDA NAKİT
 
 Onaylıyor musunuz?
 
-KART onay özeti (onaydan sonra, TAMAMI BÜYÜK HARF): aynı format + "+50 TL POS BEDELİ" ekle.
+
 
 === KAPANIŞ (sadece "evet"/"onaylıyorum"/"olur" sonrası) ===
-Şunu söyle:
+Müşteri siparişi onayladığında YALNIZCA şu cümleyi gönder, kelimesi kelimesine, fazladan hiçbir şey ekleme:
 "Siparişinizi büyük bir heyecan ve emekle hazırlayıp kargoya teslim edeceğiz. Sizin için özenle hazırlanan bu paketi kargodan teslim almanız, emeğimize vereceğiniz en güzel karşılık olacaktır. Sevgi ve minnettarlıkla, sağlıcakla kalın efendim."
-
+NOT: Bu kapanış cümlesi bu tek an için geçerlidir. Sohbetin başka hiçbir yerinde bu tarz duygusal veya abartılı ifade kullanma.
 Ardından şu JSON bloğunu çıkar (müşteriye gösterme):
 ###SIPARIS_BASLA###
 {"ad_soyad":"","telefon":"","adres":"","urun":"","adet":"","toplam":""}
@@ -821,20 +836,6 @@ const YORUM_VARYASYONLAR = [
   'Merhaba efendim, en hızlı şekilde yardımcı olabilmemiz için bize özelden yazmanızı bekliyoruz 🙏🏻',
 ];
 
-// ─── BOT'UN KENDİ IG ID'Sİ — başlangıçta çek ────────────────────────────────
-let BOT_IG_ID = '';
-async function botIdAl() {
-  try {
-    const r = await axios.get('https://graph.instagram.com/v25.0/me?fields=id', {
-      headers: { Authorization: 'Bearer ' + IG_ACCESS_TOKEN }
-    });
-    BOT_IG_ID = r.data.id;
-    console.log('Bot IG ID:', BOT_IG_ID);
-  } catch(e) {
-    console.error('Bot ID alinamadi:', e.message);
-  }
-}
-botIdAl();
 
 function rastgeleVaryasyon() {
   return YORUM_VARYASYONLAR[Math.floor(Math.random() * YORUM_VARYASYONLAR.length)];
