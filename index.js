@@ -481,7 +481,11 @@ async function isle(id) {
       const t = m.trim().toLowerCase();
       if (t !== onceki) { benzersiz.push(m); onceki = t; }
     }
-    const birlesik = benzersiz.join(' ').trim();
+    let birlesik = benzersiz.join(' ').trim();
+
+    // Kısa ürün kodu düzeltmesi: "28" → "0028", "21" → "0021" vb.
+    const KOD_MAP = { '21':'0021','22':'0022','23':'0023','24':'0024','25':'0025','26':'0026','27':'0027','28':'0028' };
+    birlesik = birlesik.replace(/\b(2[1-8])\b/g, (m) => KOD_MAP[m] || m);
 
     if (!birlesik || anlamsizMi(birlesik)) return;
 
