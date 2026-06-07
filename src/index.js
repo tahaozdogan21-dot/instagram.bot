@@ -489,7 +489,44 @@ async function isle(id) {
 
     if (!birlesik || anlamsizMi(birlesik)) return;
 
+    // ── TELEFON KONTROLÜ ──────────────────────────────────────────────────────
+    // Mesajda telefon numarası gibi bir şey varsa rakam sayısını kontrol et
+    const telMatch = birlesik.match(/(?:\+90|90|0)?[\s\-]?([5][0-9]{2})[\s\-]?([0-9]{3})[\s\-]?([0-9]{2})[\s\-]?([0-9]{2})/);
+    if (telMatch) {
+      const sadece = birlesik.replace(/\D/g, '');
+      let temizTel = sadece;
+      if (temizTel.startsWith('90')) temizTel = temizTel.slice(2);
+      if (temizTel.startsWith('0')) temizTel = temizTel.slice(1);
+      if (temizTel.length !== 10 || !temizTel.startsWith('5')) {
+        await igMesaj(id, 'Telefon numaranız hatalı görünüyor efendim, doğru numarayı tekrar iletir misiniz?');
+        return;
+      }
+    }
+
+    // ── ADRES KONTROLÜ ───────────────────────────────────────────────────────
+    // Konuşmada adres bilgisi istendiyse ve müşteri adres gönderiyorsa kontrol et
     const veri = await dbKullaniciAl(id);
+    const adresIstendi = veri.konusmalar.some(m =>
+      m.role === 'assistant' && (
+        m.content.includes('Adres (İl İlçe Mahalle)') ||
+        m.content.includes('adresinizi') ||
+        m.content.includes('Adresinizi')
+      )
+    );
+    if (adresIstendi && birlesik.length > 10 && !birlesik.match(/^\d+$/) && !birlesik.match(/^[A-Za-z0-9\s]+$/)) {
+      const kucuk = birlesik.toLowerCase();
+      const ilVar = Object.keys({'istanbul':1,'ankara':1,'izmir':1,'bursa':1,'antalya':1,'adana':1,'konya':1,'gaziantep':1,'kayseri':1,'mersin':1,'diyarbakır':1,'samsun':1,'trabzon':1,'eskişehir':1,'şanlıurfa':1,'malatya':1,'erzurum':1,'van':1,'batman':1,'mardin':1,'siirt':1,'urfa':1}).some(il => kucuk.includes(il));
+      // İlçe tespiti zor, mahalle için "mahalle" veya "mah" kelimesini ara
+      const mahalleVar = kucuk.includes('mahalle') || kucuk.includes(' mah') || kucuk.includes('mah.');
+      if (!ilVar) {
+        await igMesaj(id, 'Adresinizde il bilgisi eksik efendim, hangi ile gönderelim?');
+        return;
+      }
+      if (!mahalleVar) {
+        await igMesaj(id, 'Adresinizde mahalle bilgisi eksik efendim, ekler misiniz?');
+        return;
+      }
+    }
 
     let vitrinBuTurGitti = false;
     if (!veri.gorselGitti) {
