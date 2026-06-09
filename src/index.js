@@ -126,6 +126,10 @@ async function dbKullaniciAl(id) {
 
   // Sipariş verilmemiş, 24 saat geçtiyse sıfırla
   if ((simdi - sonMesaj) > BIR_GUN_SANIYE && row.gorsel_gitti) {
+    await db.execute({
+      sql: 'UPDATE kullanicilar SET gorsel_gitti=0, kart_uyari_gitti=0, konusmalar=?, son_mesaj=? WHERE id=?',
+      args: ['[]', simdi, id],
+    });
     return { gorselGitti: false, kartUyariGitti: false, konusmalar: [], siparisVerildi: false, siparisTarihi: 0 };
   }
   return {
