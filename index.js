@@ -6,7 +6,7 @@ const app = express();
 app.use(express.json());
 
 // ─── ENV ───────────────────────────────────────────────────────────────────────
-const VERIFY_TOKEN    = process.env.VERIFY_TOKEN    || 'formataha2024';
+const VERIFY_TOKEN    = process.env.VERIFY_TOKEN    || 'ozdogan21';
 const CLAUDE_API_KEY  = process.env.CLAUDE_API_KEY;
 const IG_ACCESS_TOKEN = process.env.IG_ACCESS_TOKEN;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -126,10 +126,6 @@ async function dbKullaniciAl(id) {
 
   // Sipariş verilmemiş, 24 saat geçtiyse sıfırla
   if ((simdi - sonMesaj) > BIR_GUN_SANIYE && row.gorsel_gitti) {
-    await db.execute({
-      sql: 'UPDATE kullanicilar SET gorsel_gitti=0, kart_uyari_gitti=0, konusmalar=?, son_mesaj=? WHERE id=?',
-      args: ['[]', simdi, id],
-    });
     return { gorselGitti: false, kartUyariGitti: false, konusmalar: [], siparisVerildi: false, siparisTarihi: 0 };
   }
   return {
@@ -675,12 +671,12 @@ Yetişkin ürünlerimizde maalesef şort bulunmamaktadır, sadece forma olarak g
 === STOK ===
 Belirli model sorulursa: "Efendim güncel modellerimiz bu şekildedir, bunların haricinde ekstra bir modelimiz yoktur."
 
-=== YENİ SEZON ÜRÜN TESLİMAT BİLGİSİ (0026 / 0027 / 0028) ===
-Müşterinin sipariş listesinde 0026, 0027 veya 0028 kodlu ürünlerden biri varsa siparişi normal şekilde al.
-Sipariş özetini göster ve "Onaylıyor musunuz?" diye sor. "Onaylıyor musunuz?" cümlesinin hemen ardına, aynı yanıt içinde şu cümleyi ekle (müşteri daha cevap vermeden):
-"Seçtiğiniz ürün şu an üretim aşamasındadır. 15 Haziran'da üretimden çıkıp paketlenerek kargoya teslim edilecektir, ardından 2-3 iş günü içerisinde kapınızda olacaktır."
-Müşteri her ikisini de görüp onaylarsa (evet/olur/onaylıyorum) kapanış cümlesini söyle ve siparişi tamamla.
-- Sadece 1 kez söyle, tekrarlama.
+
+
+
+
+
+
 
 
 === FİYATLAR ===
@@ -742,10 +738,9 @@ Başka beden önerme, alternatif sunma.
 Müşteri kalıp belirtmezse sadece kilo sor, kalıp hakkında yorum yapma.
 
 === TESLİMAT ===
-Müşteri teslim süresi sorarsa:
-- Sipariş 0026, 0027 veya 0028 içeriyorsa ya da müşteri bu ürünleri almayı düşünüyorsa: "Efendim 0026, 0027 ve 0028 kodlu yeni sezon formalarımız 15 Haziran'da kargoya verilecektir, ardından 2-3 iş günü içerisinde teslim olacaktır."
-- Diğer tüm ürünlerde: "2-3 iş günü içerisinde sizde olur efendim."
-- Müşteri ürün seçmeden sorarsa her iki bilgiyi de ver: "Mevcut ürünlerimiz 2-3 iş günü içerisinde teslim edilir. 0026, 0027 ve 0028 kodlu yeni sezon ürünlerimiz ise 15 Haziran'da kargoya verilip 2-3 iş günü içinde kapınıza ulaşır."
+Müşteri teslim süresi sorarsa: "2-3 iş günü içerisinde sizde olur efendim."
+
+
 === İADE ===
 
 Bu bilgiyi proaktif olarak söyleme. Sadece müşteri "yanlış gelirse", "dar olursa", "beden tutmazsa" gibi endişe belirtirse söyle:
