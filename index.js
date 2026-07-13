@@ -210,9 +210,9 @@ const FORMA_GORSELLERI = {
   '0023': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891832/BJK_BEYAZ_RETRO_vtectc.jpg',
   '0024': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891833/BJK_BEYAZ_RETRO_iybbwa.jpg',
   '0025': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891832/BJK_BEYAZ_RETRO_oaxlkt.jpg',
-  '0026': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1780840047/0026_yhyahd.png',
-  '0027': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1780840056/0027_l6ofmb.png',
-  '0028': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1780840052/0028_blj8dc.png',
+  '0026': 'https://res.cloudinary.com/xz4k5zol/image/upload/v1783950202/FB_YENİ_SEZON_avjjnx.png',
+  '0027': 'https://res.cloudinary.com/xz4k5zol/image/upload/v1783950205/FB_YENİ_SEZON_cjtoyf.png',
+  '0028': 'https://res.cloudinary.com/xz4k5zol/image/upload/v1783950205/FB_YENİ_SEZON_l5jy8b.png',
 };
 
 const URUN_KODLARI = {
@@ -267,49 +267,6 @@ function bekle(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-// ─── ŞEHİR TESPİTİ & RİSK ────────────────────────────────────────────────────
-const SEHIR_MAP = {
-  'eskişehir': 'eskisehir', 'istanbul': 'istanbul', 'ankara': 'ankara',
-  'izmir': 'izmir', 'şanlıurfa': 'sanliurfa', 'konya': 'konya',
-  'bursa': 'bursa', 'antalya': 'antalya', 'adana': 'adana',
-  'gaziantep': 'gaziantep', 'kayseri': 'kayseri', 'mersin': 'mersin',
-  'diyarbakır': 'diyarbakir', 'samsun': 'samsun', 'trabzon': 'trabzon',
-};
-
-function sehirTespit(adres) {
-  const k = adres.toLowerCase();
-  for (const [tr, slug] of Object.entries(SEHIR_MAP)) {
-    if (k.includes(tr)) return { isim: tr, slug };
-  }
-  return { isim: '', slug: '' };
-}
-
-function adresParcala(adres) {
-  const binaRegex = /([A-ZÇĞİÖŞÜa-zçğışöşü\s]+(APT|APARTMANI|APARTMAN|PLAZA|İŞ MERKEZİ|IS MERKEZI|İŞHANI|ISHANI|TOWER|REZİDANS|REZIDANS|BLOK)[A-ZÇĞİÖŞÜa-zçğışöşü\s\.]*)/i;
-  const binaMatch = adres.match(binaRegex);
-  const bina = binaMatch ? binaMatch[0].trim() : '';
-  const sehir = sehirTespit(adres);
-  return { bina, sehir };
-}
-
-function riskHesapla(siparis) {
-  const adres = (siparis.adres || '').toLowerCase();
-  const riskliKelimeler = ['plaza', 'iş merkezi', 'is merkezi', 'işhanı', 'ishani', 'tower', 'rezidans', 'ofis', 'büro', 'buro'];
-  const bulunan = riskliKelimeler.filter(k => adres.includes(k));
-
-  if (bulunan.length > 0) {
-    const etiket = bulunan.map(k => k.charAt(0).toUpperCase() + k.slice(1)).join(', ');
-    return { riskEmoji: '🔴', riskTR: 'YÜKSEK RİSK', riskAciklama: etiket + ' tespit edildi' };
-  }
-
-  const katRegex = /k[:\.]?\s*[3-9]|kat\s*[3-9]/i;
-  if (katRegex.test(siparis.adres || '')) {
-    return { riskEmoji: '🟡', riskTR: 'ORTA RİSK', riskAciklama: 'Yüksek kat — ofis olabilir' };
-  }
-
-  return { riskEmoji: '🟢', riskTR: 'NORMAL', riskAciklama: 'Standart konut adresi' };
-}
-
 function telegramMesajOlustur(siparis) {
   const urun = kodaIsimCevir(siparis.urun.toUpperCase());
   const telefon = (siparis.telefon || '').replace(/\s/g, '');
@@ -317,34 +274,15 @@ function telegramMesajOlustur(siparis) {
   if (telefonRakam.startsWith('90')) telefonRakam = telefonRakam.slice(2);
   if (telefonRakam.startsWith('0')) telefonRakam = telefonRakam.slice(1);
   const telefonUyari = telefonRakam.length !== 10 ? ' ⚠️EKSİK' : '';
-  const { bina, sehir } = adresParcala(siparis.adres || '');
-  const { riskEmoji, riskTR, riskAciklama } = riskHesapla(siparis);
-  const baroLink = 'https://www.barobirlik.org.tr/AvukatArama/?q=' + encodeURIComponent(siparis.ad_soyad);
-  const googleTel = 'https://www.google.com/search?q=' + encodeURIComponent('"' + telefon + '"');
-  const googleIsimSadece = 'https://www.google.com/search?q=' + encodeURIComponent('"' + siparis.ad_soyad + '"');
-  const googleIsimSehir = 'https://www.google.com/search?q=' + encodeURIComponent('"' + siparis.ad_soyad + '" ' + sehir.isim + ' avukat hukuk');
-  const googleAdres = 'https://www.google.com/search?q=' + encodeURIComponent('"' + (bina || siparis.adres) + '" avukat hukuk');
+  const kargo = (siparis.kargo || 'ARAS KARGO').toString().toUpperCase();
   return '📦 YENİ SİPARİŞ!\n\n' +
     'AD: ' + siparis.ad_soyad.toUpperCase() + '\n' +
     'TEL: ' + siparis.telefon + telefonUyari + '\n' +
     'ADRES: ' + siparis.adres.toUpperCase() + '\n' +
     'ÜRÜN: ' + urun + '\n' +
     'TOPLAM: ' + siparis.toplam + ' TL\n' +
-    'TOPLAM ADET: ' + (siparis.adet || '-') + '\n\n' +
-    '━━━━━━━━━━━━━━━━━━━━━\n' +
-    riskEmoji + ' ' + riskTR + ' — ' + riskAciklama + '\n' +
-    '━━━━━━━━━━━━━━━━━━━━━\n' +
-    '🔗 SORGULA\n' +
-    '━━━━━━━━━━━━━━━━━━━━━\n' +
-    '📱 ' + googleTel + '\n' +
-    '──────────────────\n' +
-    '👤 ' + googleIsimSadece + '\n' +
-    '──────────────────\n' +
-    '👤 ' + googleIsimSehir + '\n' +
-    '──────────────────\n' +
-    '⚖️ ' + baroLink + '\n' +
-    '──────────────────\n' +
-    '🏢 ' + googleAdres;
+    'TOPLAM ADET: ' + (siparis.adet || '-') + '\n' +
+    'KARGO: ' + kargo;
 }
 
 async function telegramGonder(siparis) {
@@ -700,11 +638,21 @@ Müşteri fiyat, kampanya, kaç para gibi sorular sorarsa önce ###VITRIN_GOSTER
 
 === BEDEN ===
 Beden tablosunu müşteriye ASLA gösterme. Sadece kilo sor, sonucu söyle.
-55-65 kg → S | 66-75 kg → M | 76-85 kg → L | 86-95 kg → XL | 96+ kg → XXL
+55-65 kg → S | 66-75 kg → M | 76-85 kg → L | 86-95 kg → XL | 96-105 kg → 2XL | 106-115 kg → 3XL | 116-125 kg → 4XL | 126-135 kg → 5XL | 136+ kg → 6XL
 Beden zaten belli ise tekrar sorma.
+S'ten 6XL'e kadar TÜM bedenler mevcuttur. "Bu beden yok", "bulunmuyor" gibi ifadeler KESİNLİKLE YASAK (7XL ve üzeri hariç, aşağıya bak).
 
 Müşteri boy endişesi belirtirse:
 "Efendim o boy için [beden] tam olur, gönül rahatlığıyla alabilirsiniz."
+
+=== BEDEN VARYANT TANIMA (KESİN KURAL) ===
+Müşteri bedeni farklı şekillerde yazabilir, hepsini AYNI bedene eşle, asla anlamadığını belirtme veya tekrar sorma:
+- "2XL", "XXL", "2X Large", "2X-Large", "double XL", "çift xl" → 2XL
+- "3XL", "XXXL", "3X Large", "3X-Large", "triple XL" → 3XL
+- "4XL", "4X Large", "4X-Large" → 4XL
+- "5XL", "5X Large", "5X-Large" → 5XL
+- "6XL", "6X Large", "6X-Large" → 6XL
+Müşteri direkt bu bedenlerden birini isterse kilo sormadan direkt o bedeni kabul et, sipariş özetine o beden ile yaz.
 
 === EKSİK BİLGİ TAMAMLAMA ===
 Müşteri eksik bilgi verirse sadece eksik olanı sor, kendi düşünceni katma:
@@ -728,10 +676,9 @@ Müşteri dar/normal/standart isterse VEYA "dar kalıp var mı" diye sorarsa:
 "Ürünlerimiz standart kalıplıdır efendim, dar kalıp tercihine de uygundur."
 ASLA "geniş kalıplıdır" deme eğer müşteri dar kalıp istiyorsa.
 
-Müşteri 3XL isterse:
-"Efendim 3XL bedenimiz bulunmuyor, ancak kalıplarımız geniş olduğu için 2XL sizin için tam oturacaktır. Dilerseniz 2XL üzerinden yardımcı olayım."
+Müşteri 2XL, 3XL, 4XL, 5XL veya 6XL isterse: bu bedenler mevcuttur, direkt kabul et, "bulunmuyor" deme.
 
-Müşteri 4XL, 5XL, 6XL, 7XL, 8XL veya 9XL isterse:
+Müşteri 7XL, 8XL veya 9XL isterse:
 "Maalesef sizlere uygun bir bedenimiz bulunmuyor."
 Başka beden önerme, alternatif sunma.
 
@@ -776,10 +723,14 @@ KESİN KURAL: Mesajda 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028 sayıların
 === KAÇ ADET / HANGİ TAKIM ===
 "Fenerbahçe mi yoksa başka takım mı?" sor. Fenerbahçe: güncel modelleri göster. Diğer: WhatsApp yönlendir.
 
-=== KARGO ===
-- Şeffaf Kargo: kapıda ödeme, ürünü görerek teslim alırsınız.
-- PTT: anlaşmamız yok. Araş şubesi uzaksa en yakın şubeyi öner.
-- Diğer kargo: sadece Araş ile gönderim yapılıyor.
+=== KARGO (KESİN KURAL) ===
+- Kapıda ödeme, ürünü görerek teslim alınır.
+- Müşteri "hangi kargo ile çalışıyorsunuz", "kargo firmanız ne", "hangi kargo" gibi bir şey sorarsa AYNEN şunu sor: "PTT Kargo ve Araş Kargo ile çalışıyoruz, hangisini tercih edersiniz?"
+- Müşteri "PTT" derse: kargo bilgisi olarak PTT KARGO kaydet.
+- Müşteri "Araş" derse: kargo bilgisi olarak ARAS KARGO kaydet.
+- Müşteri kargo firması sormadan siparişe devam ederse, hiçbir şey sorma, VARSAYILAN olarak ARAS KARGO kaydet.
+- Sipariş özetinin EN ALTINA mutlaka "KARGO: [FİRMA]" satırını ekle, JSON çıktısına da "kargo" alanını mutlaka doldur.
+- Müşteri kargo konusunda başka bir şey sorarsa (PTT'nin anlaşması yok gibi) bahsetme, yukarıdaki iki seçenek dışında bilgi verme.
 
 === SIK SORULAR ===
 - Kumaş: forma kumaşı, koku yapmaz.
@@ -822,6 +773,7 @@ NAKİT onay özeti (TAMAMI BÜYÜK HARF):
 [ÜRÜN ADI] [BEDEN] - [ADET] ADET
 
 TOPLAM: X TL - KAPIDA NAKİT
+KARGO: [PTT KARGO / ARAS KARGO]
 
 Onaylıyor musunuz?
 
@@ -833,8 +785,9 @@ Müşteri siparişi onayladığında YALNIZCA şu cümleyi gönder, kelimesi kel
 NOT: Bu kapanış cümlesi bu tek an için geçerlidir. Sohbetin başka hiçbir yerinde bu tarz duygusal veya abartılı ifade kullanma.
 Ardından şu JSON bloğunu çıkar (müşteriye gösterme):
 ###SIPARIS_BASLA###
-{"ad_soyad":"","telefon":"","adres":"","urun":"","adet":"","toplam":""}
-###SIPARIS_BITIS###`;
+{"ad_soyad":"","telefon":"","adres":"","urun":"","adet":"","toplam":"","kargo":""}
+###SIPARIS_BITIS###
+NOT: "kargo" alanına müşteri PTT dediyse "PTT KARGO", Araş dediyse "ARAS KARGO", hiç belirtmediyse "ARAS KARGO" yaz. Bu alan ASLA boş bırakılmaz.`;
 
 // ─── WEBHOOK ──────────────────────────────────────────────────────────────────
 
