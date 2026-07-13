@@ -210,9 +210,9 @@ const FORMA_GORSELLERI = {
   '0023': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891832/BJK_BEYAZ_RETRO_vtectc.jpg',
   '0024': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891833/BJK_BEYAZ_RETRO_iybbwa.jpg',
   '0025': 'https://res.cloudinary.com/dzfiyamng/image/upload/v1778891832/BJK_BEYAZ_RETRO_oaxlkt.jpg',
-  '0026': 'https://res.cloudinary.com/xz4k5zol/image/upload/v1783950202/FB_YENİ_SEZON_avjjnx.png',
-  '0027': 'https://res.cloudinary.com/xz4k5zol/image/upload/v1783950205/FB_YENİ_SEZON_cjtoyf.png',
-  '0028': 'https://res.cloudinary.com/xz4k5zol/image/upload/v1783950205/FB_YENİ_SEZON_l5jy8b.png',
+  '0026': 'https://res.cloudinary.com/xz4k5zol/image/upload/v1783950202/FB_YEN%C4%B0_SEZON_avjjnx.png',
+  '0027': 'https://res.cloudinary.com/xz4k5zol/image/upload/v1783950205/FB_YEN%C4%B0_SEZON_cjtoyf.png',
+  '0028': 'https://res.cloudinary.com/xz4k5zol/image/upload/v1783950205/FB_YEN%C4%B0_SEZON_l5jy8b.png',
 };
 
 const URUN_KODLARI = {
@@ -725,9 +725,9 @@ KESİN KURAL: Mesajda 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028 sayıların
 
 === KARGO (KESİN KURAL) ===
 - Kapıda ödeme, ürünü görerek teslim alınır.
-- Müşteri "hangi kargo ile çalışıyorsunuz", "kargo firmanız ne", "hangi kargo" gibi bir şey sorarsa AYNEN şunu sor: "PTT Kargo ve Araş Kargo ile çalışıyoruz, hangisini tercih edersiniz?"
+- Müşteri "hangi kargo ile çalışıyorsunuz", "kargo firmanız ne", "hangi kargo" gibi bir şey sorarsa AYNEN şunu sor: "PTT Kargo ve Aras Kargo ile çalışıyoruz, hangisini tercih edersiniz?"
 - Müşteri "PTT" derse: kargo bilgisi olarak PTT KARGO kaydet.
-- Müşteri "Araş" derse: kargo bilgisi olarak ARAS KARGO kaydet.
+- Müşteri "Aras" derse: kargo bilgisi olarak ARAS KARGO kaydet.
 - Müşteri kargo firması sormadan siparişe devam ederse, hiçbir şey sorma, VARSAYILAN olarak ARAS KARGO kaydet.
 - Sipariş özetinin EN ALTINA mutlaka "KARGO: [FİRMA]" satırını ekle, JSON çıktısına da "kargo" alanını mutlaka doldur.
 - Müşteri kargo konusunda başka bir şey sorarsa (PTT'nin anlaşması yok gibi) bahsetme, yukarıdaki iki seçenek dışında bilgi verme.
@@ -787,7 +787,7 @@ Ardından şu JSON bloğunu çıkar (müşteriye gösterme):
 ###SIPARIS_BASLA###
 {"ad_soyad":"","telefon":"","adres":"","urun":"","adet":"","toplam":"","kargo":""}
 ###SIPARIS_BITIS###
-NOT: "kargo" alanına müşteri PTT dediyse "PTT KARGO", Araş dediyse "ARAS KARGO", hiç belirtmediyse "ARAS KARGO" yaz. Bu alan ASLA boş bırakılmaz.`;
+NOT: "kargo" alanına müşteri PTT dediyse "PTT KARGO", Aras dediyse "ARAS KARGO", hiç belirtmediyse "ARAS KARGO" yaz. Bu alan ASLA boş bırakılmaz.`;
 
 // ─── WEBHOOK ──────────────────────────────────────────────────────────────────
 
